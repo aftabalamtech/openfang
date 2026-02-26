@@ -32,8 +32,7 @@ async function startConnection() {
   const pino = (await import('pino')).default || await import('pino');
 
   const logger = pino({ level: 'warn' });
-  const authDir = new URL('./auth_store/', import.meta.url || `file://${__dirname}/`).pathname
-    || require('node:path').join(__dirname, 'auth_store');
+  const authDir = require('node:path').join(__dirname, 'auth_store');
 
   const { state, saveCreds } = await useMultiFileAuthState(
     require('node:path').join(__dirname, 'auth_store')

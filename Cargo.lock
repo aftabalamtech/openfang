@@ -3852,6 +3852,7 @@ dependencies = [
  "dirs 6.0.0",
  "futures",
  "hex",
+ "libc",
  "openfang-channels",
  "openfang-extensions",
  "openfang-hands",
