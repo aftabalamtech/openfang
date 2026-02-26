@@ -42,6 +42,11 @@ jobs:
             args: "--target x86_64-pc-windows-msvc"
             rust_target: x86_64-pc-windows-msvc
 
+          - name: Windows ARM64
+            os: windows-latest
+            args: "--target aarch64-pc-windows-msvc"
+            rust_target: aarch64-pc-windows-msvc
+
     runs-on: ${{ matrix.platform.os }}
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +155,9 @@ jobs:
             os: macos-latest
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: aarch64-pc-windows-msvc
             os: windows-latest
             archive: zip
 
