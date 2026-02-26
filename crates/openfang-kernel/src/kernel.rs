@@ -3105,15 +3105,28 @@ impl OpenFangKernel {
                                 tracing::debug!(job = %job_name, agent = %agent_id, "Cron: firing agent turn");
                                 let timeout_s = timeout_secs.unwrap_or(120);
                                 let timeout = std::time::Duration::from_secs(timeout_s);
+                                let delivery = job.delivery.clone();
                                 match tokio::time::timeout(
                                     timeout,
                                     kernel.send_message(agent_id, message),
                                 )
                                 .await
                                 {
-                                    Ok(Ok(_result)) => {
+                                    Ok(Ok(result)) => {
                                         tracing::info!(job = %job_name, "Cron job completed successfully");
                                         kernel.cron_scheduler.record_success(job_id);
+
+                                        // Route the response through the delivery target
+                                        if !result.response.is_empty() && !result.silent {
+                                            cron_deliver_response(
+                                                &kernel,
+                                                agent_id,
+                                                &job_name,
+                                                &result.response,
+                                                &delivery,
+                                            )
+                                            .await;
+                                        }
                                     }
                                     Ok(Err(e)) => {
                                         let err_msg = format!("{e}");
@@ -4080,6 +4093,155 @@ impl OpenFangKernel {
             }
         }
         context_parts.join("\n\n")
+    }
+}
+
+/// Deliver a cron job's agent response to the configured delivery target.
+///
+/// Supports Telegram (via direct Bot API call), webhook (HTTP POST), and
+/// `LastChannel` (looks up the most recent delivery receipt for the agent).
+async fn cron_deliver_response(
+    kernel: &OpenFangKernel,
+    agent_id: AgentId,
+    job_name: &str,
+    response: &str,
+    delivery: &openfang_types::scheduler::CronDelivery,
+) {
+    use openfang_types::scheduler::CronDelivery;
+
+    match delivery {
+        CronDelivery::None => {}
+        CronDelivery::Channel { channel, to } => {
+            if let Err(e) = cron_send_to_channel(kernel, channel, to, response).await {
+                tracing::warn!(
+                    job = %job_name,
+                    channel = %channel,
+                    "Cron delivery failed: {e}"
+                );
+            } else {
+                tracing::info!(
+                    job = %job_name,
+                    channel = %channel,
+                    "Cron delivery sent"
+                );
+            }
+        }
+        CronDelivery::LastChannel => {
+            // Look up the most recent successful delivery receipt for this agent
+            let receipts = kernel.delivery_tracker.get_receipts(agent_id, 1);
+            let (channel, recipient) = if let Some(receipt) = receipts.first() {
+                (receipt.channel.clone(), receipt.recipient.clone())
+            } else {
+                // Fallback: check KV store for persisted last channel info (survives restarts)
+                match kernel.memory.structured_get(agent_id, "delivery.last_channel") {
+                    Ok(Some(v)) => {
+                        let ch = v["channel"].as_str().unwrap_or("").to_string();
+                        let to = v["recipient"].as_str().unwrap_or("").to_string();
+                        if ch.is_empty() || to.is_empty() {
+                            tracing::warn!(
+                                job = %job_name,
+                                "Cron LastChannel: no delivery info found (in-memory or KV)"
+                            );
+                            return;
+                        }
+                        (ch, to)
+                    }
+                    _ => {
+                        tracing::warn!(
+                            job = %job_name,
+                            "Cron LastChannel: no previous delivery receipt found for agent"
+                        );
+                        return;
+                    }
+                }
+            };
+
+            if let Err(e) = cron_send_to_channel(kernel, &channel, &recipient, response).await {
+                tracing::warn!(
+                    job = %job_name,
+                    channel = %channel,
+                    "Cron LastChannel delivery failed: {e}"
+                );
+            } else {
+                tracing::info!(
+                    job = %job_name,
+                    channel = %channel,
+                    "Cron LastChannel delivery sent"
+                );
+            }
+        }
+        CronDelivery::Webhook { url } => {
+            let client = reqwest::Client::new();
+            let payload = serde_json::json!({
+                "job_name": job_name,
+                "agent_id": agent_id.to_string(),
+                "response": response,
+            });
+            match client.post(url).json(&payload).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(job = %job_name, "Cron webhook delivery sent");
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        job = %job_name,
+                        status = %resp.status(),
+                        "Cron webhook delivery failed"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(job = %job_name, "Cron webhook delivery error: {e}");
+                }
+            }
+        }
+    }
+}
+
+/// Send a cron response to a specific channel (telegram, discord, etc.).
+async fn cron_send_to_channel(
+    kernel: &OpenFangKernel,
+    channel: &str,
+    recipient: &str,
+    text: &str,
+) -> Result<(), String> {
+    match channel {
+        "telegram" => {
+            let token = kernel
+                .config
+                .channels
+                .telegram
+                .as_ref()
+                .and_then(|cfg| {
+                    let env_var = &cfg.bot_token_env;
+                    std::env::var(env_var).ok()
+                })
+                .ok_or_else(|| "Telegram bot token not configured".to_string())?;
+
+            let url = format!(
+                "https://api.telegram.org/bot{}/sendMessage",
+                token
+            );
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "chat_id": recipient,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                }))
+                .send()
+                .await
+                .map_err(|e| format!("Telegram API error: {e}"))?;
+
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(format!("Telegram API {status}: {body}"));
+            }
+            Ok(())
+        }
+        _ => Err(format!(
+            "Unsupported cron delivery channel: {channel}"
+        )),
     }
 }
 
