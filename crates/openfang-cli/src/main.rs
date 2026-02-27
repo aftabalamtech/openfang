@@ -985,7 +985,7 @@ pub(crate) fn daemon_client() -> reqwest::blocking::Client {
 }
 
 fn daemon_api_key() -> Option<String> {
-    let config_path = openfang_home().join("config.toml");
+    let config_path = dirs::home_dir()?.join(".openfang").join("config.toml");
     let content = std::fs::read_to_string(config_path).ok()?;
     parse_api_key_from_config_toml(&content)
 }
