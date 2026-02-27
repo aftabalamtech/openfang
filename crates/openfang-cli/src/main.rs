@@ -968,10 +968,36 @@ pub(crate) fn find_daemon() -> Option<String> {
 
 /// Build an HTTP client for daemon calls.
 pub(crate) fn daemon_client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .expect("Failed to build HTTP client")
+    let mut builder =
+        reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(120));
+
+    if let Some(api_key) = daemon_api_key() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        let auth_value = format!("Bearer {api_key}");
+        if let Ok(mut hv) = reqwest::header::HeaderValue::from_str(&auth_value) {
+            hv.set_sensitive(true);
+            headers.insert(reqwest::header::AUTHORIZATION, hv);
+            builder = builder.default_headers(headers);
+        }
+    }
+
+    builder.build().expect("Failed to build HTTP client")
+}
+
+fn daemon_api_key() -> Option<String> {
+    let config_path = openfang_home().join("config.toml");
+    let content = std::fs::read_to_string(config_path).ok()?;
+    parse_api_key_from_config_toml(&content)
+}
+
+fn parse_api_key_from_config_toml(content: &str) -> Option<String> {
+    let table: toml::Value = toml::from_str(content).ok()?;
+    let api_key = table.get("api_key")?.as_str()?.trim();
+    if api_key.is_empty() {
+        None
+    } else {
+        Some(api_key.to_string())
+    }
 }
 
 /// Helper: send a request to the daemon and parse the JSON body.
@@ -5651,5 +5677,43 @@ args = ["-y", "@modelcontextprotocol/server-github"]
             HookEvent::AgentLoopEnd,
         ];
         assert_eq!(events.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_api_key_from_config_toml_present() {
+        let config = r#"
+api_listen = "127.0.0.1:4200"
+api_key = "test-secret"
+
+[default_model]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+"#;
+        let parsed = parse_api_key_from_config_toml(config);
+        assert_eq!(parsed.as_deref(), Some("test-secret"));
+    }
+
+    #[test]
+    fn test_parse_api_key_from_config_toml_empty_or_missing() {
+        let with_empty = r#"
+api_listen = "127.0.0.1:4200"
+api_key = ""
+
+[default_model]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+"#;
+        let missing = r#"
+api_listen = "127.0.0.1:4200"
+
+[default_model]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+"#;
+        assert_eq!(parse_api_key_from_config_toml(with_empty), None);
+        assert_eq!(parse_api_key_from_config_toml(missing), None);
     }
 }
