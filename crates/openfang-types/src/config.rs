@@ -1039,6 +1039,29 @@ pub struct KernelConfig {
     /// Global spending budget configuration.
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// OAuth client ID configuration.
+    #[serde(default)]
+    pub oauth: OAuthConfig,
+}
+
+/// OAuth client ID configuration.
+///
+/// Users should set their own OAuth client IDs here for real PKCE flows.
+/// If not set, placeholder defaults are used.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OAuthConfig {
+    /// Google OAuth client ID.
+    #[serde(default)]
+    pub google_client_id: Option<String>,
+    /// GitHub OAuth client ID.
+    #[serde(default)]
+    pub github_client_id: Option<String>,
+    /// Microsoft OAuth client ID.
+    #[serde(default)]
+    pub microsoft_client_id: Option<String>,
+    /// Slack OAuth client ID.
+    #[serde(default)]
+    pub slack_client_id: Option<String>,
 }
 
 /// Global spending budget configuration.
@@ -1183,6 +1206,7 @@ impl Default for KernelConfig {
             auth_profiles: HashMap::new(),
             thinking: None,
             budget: BudgetConfig::default(),
+            oauth: OAuthConfig::default(),
         }
     }
 }
@@ -1275,6 +1299,7 @@ impl std::fmt::Debug for KernelConfig {
                 &format!("{} provider(s)", self.auth_profiles.len()),
             )
             .field("thinking", &self.thinking.is_some())
+            .field("oauth", &self.oauth)
             .finish()
     }
 }
