@@ -37,6 +37,7 @@ pub const QWEN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/
 pub const MINIMAX_BASE_URL: &str = "https://api.minimax.chat/v1";
 pub const ZHIPU_BASE_URL: &str = "https://open.bigmodel.cn/api/paas/v4";
 pub const MOONSHOT_BASE_URL: &str = "https://api.moonshot.cn/v1";
+pub const KIMI_FOR_CODING_BASE_URL: &str = "https://api.moonshot.ai/v1";
 pub const QIANFAN_BASE_URL: &str = "https://qianfan.baidubce.com/v2";
 
 // ── AWS Bedrock ───────────────────────────────────────────────────

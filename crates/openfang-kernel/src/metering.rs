@@ -384,6 +384,9 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
     }
 
     // ── Moonshot / Kimi ─────────────────────────────────────────
+    if model.contains("kimi-k2") {
+        return (0.60, 2.50);
+    }
     if model.contains("moonshot") || model.contains("kimi") {
         return (0.80, 0.80);
     }

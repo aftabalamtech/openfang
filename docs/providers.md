@@ -1,6 +1,6 @@
 # LLM Providers Guide
 
-OpenFang ships with a comprehensive model catalog covering **3 native LLM drivers**, **20 providers**, **51 builtin models**, and **23 aliases**. Every provider uses one of three battle-tested drivers: the native **Anthropic** driver, the native **Gemini** driver, or the universal **OpenAI-compatible** driver. This guide is the single source of truth for configuring, selecting, and managing LLM providers in OpenFang.
+OpenFang ships with a comprehensive model catalog covering **3 native LLM drivers**, **21 providers**, **55 builtin models**, and **23 aliases**. Every provider uses one of three battle-tested drivers: the native **Anthropic** driver, the native **Gemini** driver, or the universal **OpenAI-compatible** driver. This guide is the single source of truth for configuring, selecting, and managing LLM providers in OpenFang.
 
 ---
 
@@ -540,6 +540,32 @@ For Gemini specifically, either `GEMINI_API_KEY` or `GOOGLE_API_KEY` will work.
 2. Go to Account > API Tokens
 3. `export REPLICATE_API_TOKEN="r8_..."`
 
+### 21. Kimi (Coding) — K2 Series
+
+| | |
+|---|---|
+| **Display Name** | Kimi (Coding) |
+| **Driver** | OpenAI-compatible |
+| **Env Var** | `MOONSHOT_API_KEY` |
+| **Base URL** | `https://api.moonshot.ai/v1` |
+| **Key Required** | Yes |
+| **Free Tier** | No |
+| **Auth** | `Authorization: Bearer` header |
+| **Models** | 4 |
+
+**Available Models:**
+- `kimi-k2` (Smart) — 128K context, 1T MoE, optimized for coding/agents
+- `kimi-k2-0905` (Smart) — 256K context snapshot
+- `kimi-k2-thinking` (Smart) — 256K with extended reasoning/CoT
+- `kimi-k2.5` (Frontier) — 256K, multimodal vision (MoonViT3d), Jan 2026
+
+**Setup:**
+1. Sign up at [platform.moonshot.ai](https://platform.moonshot.ai)
+2. Create an API key
+3. `export MOONSHOT_API_KEY="sk-..."`
+
+**Notes:** The `MOONSHOT_API_KEY` is shared with the `moonshot` provider (V1 series). Both providers activate with the same key. China-region users can override the base URL by adding `kimi-for-coding = "https://api.moonshot.cn/v1"` under `[provider_urls]` in `config.toml` (supports hot-reload, no daemon restart needed).
+
 ---
 
 ## Model Catalog
@@ -594,6 +620,10 @@ The complete catalog of all 51 builtin models, sorted by provider. Pricing is pe
 | 44 | `grok-2-mini` | Grok 2 Mini | xai | Fast | 131,072 | 32,768 | $0.30 | $0.50 | Yes | No |
 | 45 | `hf/meta-llama/Llama-3.3-70B-Instruct` | Llama 3.3 70B (HF) | huggingface | Balanced | 128,000 | 4,096 | $0.30 | $0.30 | No | No |
 | 46 | `replicate/meta-llama-3.3-70b-instruct` | Llama 3.3 70B (Replicate) | replicate | Balanced | 128,000 | 4,096 | $0.40 | $0.40 | No | No |
+| 47 | `kimi-k2` | Kimi K2 | kimi-for-coding | Smart | 131,072 | 16,384 | $0.60 | $2.50 | Yes | No |
+| 48 | `kimi-k2-0905` | Kimi K2 (256K) | kimi-for-coding | Smart | 262,144 | 32,768 | $0.60 | $2.50 | Yes | No |
+| 49 | `kimi-k2-thinking` | Kimi K2 Thinking | kimi-for-coding | Smart | 262,144 | 32,768 | $0.60 | $2.50 | Yes | No |
+| 50 | `kimi-k2.5` | Kimi K2.5 | kimi-for-coding | Frontier | 262,144 | 32,768 | $0.60 | $2.50 | Yes | Yes |
 
 **Model Tiers:**
 
@@ -1033,6 +1063,7 @@ Quick reference for all provider environment variables:
 | Hugging Face | `HF_API_KEY` | Yes |
 | xAI | `XAI_API_KEY` | Yes |
 | Replicate | `REPLICATE_API_TOKEN` | Yes |
+| Kimi (Coding) | `MOONSHOT_API_KEY` | Yes |
 
 ---
 

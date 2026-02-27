@@ -5940,6 +5940,9 @@ pub async fn set_provider_url(
         );
     }
 
+    // Strip trailing slash to prevent double-slash in concatenated paths
+    let base_url = base_url.trim_end_matches('/').to_string();
+
     // Update catalog in memory
     {
         let mut catalog = state
@@ -6012,7 +6015,9 @@ fn upsert_provider_url(
         std::fs::create_dir_all(parent)?;
     }
 
-    std::fs::write(config_path, toml::to_string_pretty(&doc)?)?;
+    let tmp_path = config_path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, toml::to_string_pretty(&doc)?)?;
+    std::fs::rename(&tmp_path, config_path)?;
     Ok(())
 }
 

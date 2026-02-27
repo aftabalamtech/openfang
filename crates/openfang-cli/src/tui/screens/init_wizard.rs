@@ -53,6 +53,14 @@ const PROVIDERS: &[ProviderInfo] = &[
         hint: "cheap",
     },
     ProviderInfo {
+        name: "kimi-for-coding",
+        display: "Kimi (Coding)",
+        env_var: "MOONSHOT_API_KEY",
+        default_model: "kimi-k2",
+        needs_key: true,
+        hint: "code-optimized",
+    },
+    ProviderInfo {
         name: "anthropic",
         display: "Anthropic",
         env_var: "ANTHROPIC_API_KEY",

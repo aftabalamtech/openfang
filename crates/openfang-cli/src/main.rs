@@ -1212,6 +1212,12 @@ fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static st
         ("gemini", "GEMINI_API_KEY", "gemini-2.5-flash", "Gemini"),
         ("deepseek", "DEEPSEEK_API_KEY", "deepseek-chat", "DeepSeek"),
         (
+            "kimi-for-coding",
+            "MOONSHOT_API_KEY",
+            "kimi-k2",
+            "Kimi (Coding)",
+        ),
+        (
             "anthropic",
             "ANTHROPIC_API_KEY",
             "claude-sonnet-4-20250514",

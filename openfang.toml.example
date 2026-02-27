@@ -11,6 +11,17 @@ model = "claude-sonnet-4-20250514"        # Model identifier
 api_key_env = "ANTHROPIC_API_KEY"         # Environment variable holding API key
 # base_url = "https://api.anthropic.com"  # Optional: override API endpoint
 
+# Provider base URL overrides — use to point providers at remote or custom endpoints.
+# The URL must include the /v1 path for OpenAI-compatible providers.
+#
+# Example: Ollama running on a remote machine at 192.168.1.100
+# [provider_urls]
+# ollama = "http://192.168.1.100:11434/v1"
+#
+# Example: vLLM on a GPU server
+# [provider_urls]
+# vllm = "http://gpu-server.local:8000/v1"
+
 [memory]
 decay_rate = 0.05                         # Memory confidence decay rate
 # sqlite_path = "~/.openfang/data/openfang.db"   # Optional: custom DB path

@@ -7,7 +7,8 @@ use openfang_types::model_catalog::{
     AuthStatus, ModelCatalogEntry, ModelTier, ProviderInfo, AI21_BASE_URL, ANTHROPIC_BASE_URL,
     BEDROCK_BASE_URL, CEREBRAS_BASE_URL, COHERE_BASE_URL, DEEPSEEK_BASE_URL, FIREWORKS_BASE_URL,
     GEMINI_BASE_URL, GITHUB_COPILOT_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL,
-    LMSTUDIO_BASE_URL, MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL,
+    KIMI_FOR_CODING_BASE_URL, LMSTUDIO_BASE_URL, MINIMAX_BASE_URL, MISTRAL_BASE_URL,
+    MOONSHOT_BASE_URL, OLLAMA_BASE_URL,
     OPENAI_BASE_URL, OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
     REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
     ZHIPU_BASE_URL,
@@ -445,6 +446,15 @@ fn builtin_providers() -> Vec<ProviderInfo> {
             model_count: 0,
         },
         ProviderInfo {
+            id: "kimi-for-coding".into(),
+            display_name: "Kimi (Coding)".into(),
+            api_key_env: "MOONSHOT_API_KEY".into(),
+            base_url: KIMI_FOR_CODING_BASE_URL.into(),
+            key_required: true,
+            auth_status: AuthStatus::Missing,
+            model_count: 0,
+        },
+        ProviderInfo {
             id: "qianfan".into(),
             display_name: "Baidu Qianfan".into(),
             api_key_env: "QIANFAN_API_KEY".into(),
@@ -518,6 +528,9 @@ fn builtin_aliases() -> HashMap<String, String> {
         ("ernie", "ernie-4.5-8k"),
         ("kimi", "moonshot-v1-128k"),
         ("minimax", "minimax-text-01"),
+        // Kimi K2 aliases
+        ("kimi-k2", "kimi-k2"),
+        ("kimi-coding", "kimi-k2"),
     ];
     pairs
         .into_iter()
@@ -2395,6 +2408,65 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec![],
         },
         // ══════════════════════════════════════════════════════════════
+        // Kimi for Coding / Kimi K2 (4)
+        // ══════════════════════════════════════════════════════════════
+        ModelCatalogEntry {
+            id: "kimi-k2".into(),
+            display_name: "Kimi K2".into(),
+            provider: "kimi-for-coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 131_072,
+            max_output_tokens: 16_384,
+            input_cost_per_m: 0.60,
+            output_cost_per_m: 2.50,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec!["kimi-k2".into(), "kimi-coding".into()],
+        },
+        ModelCatalogEntry {
+            id: "kimi-k2-0905".into(),
+            display_name: "Kimi K2 (256K)".into(),
+            provider: "kimi-for-coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 262_144,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.60,
+            output_cost_per_m: 2.50,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "kimi-k2-thinking".into(),
+            display_name: "Kimi K2 Thinking".into(),
+            provider: "kimi-for-coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 262_144,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.60,
+            output_cost_per_m: 2.50,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "kimi-k2.5".into(),
+            display_name: "Kimi K2.5".into(),
+            provider: "kimi-for-coding".into(),
+            tier: ModelTier::Frontier,
+            context_window: 262_144,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.60,
+            output_cost_per_m: 2.50,
+            supports_tools: true,
+            supports_vision: true,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        // ══════════════════════════════════════════════════════════════
         // Baidu Qianfan / ERNIE (3)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
@@ -2570,7 +2642,7 @@ mod tests {
     #[test]
     fn test_catalog_has_providers() {
         let catalog = ModelCatalog::new();
-        assert_eq!(catalog.list_providers().len(), 27);
+        assert_eq!(catalog.list_providers().len(), 28);
     }
 
     #[test]
@@ -2855,5 +2927,23 @@ mod tests {
             catalog.get_provider("lmstudio").unwrap().base_url,
             LMSTUDIO_BASE_URL
         );
+    }
+
+    #[test]
+    fn test_no_duplicate_provider_ids() {
+        let catalog = ModelCatalog::new();
+        let mut seen = std::collections::HashSet::new();
+        for p in catalog.list_providers() {
+            assert!(seen.insert(p.id.clone()), "Duplicate provider ID: {}", p.id);
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_model_ids() {
+        let catalog = ModelCatalog::new();
+        let mut seen = std::collections::HashSet::new();
+        for m in catalog.list_models() {
+            assert!(seen.insert(m.id.clone()), "Duplicate model ID: {}", m.id);
+        }
     }
 }

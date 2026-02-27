@@ -525,7 +525,9 @@ impl OpenFangKernel {
         let driver_config = DriverConfig {
             provider: config.default_model.provider.clone(),
             api_key: std::env::var(&config.default_model.api_key_env).ok(),
-            base_url: config.default_model.base_url.clone(),
+            base_url: config.default_model.base_url.as_deref()
+                .or_else(|| config.provider_urls.get(&config.default_model.provider).map(|s| s.as_str()))
+                .map(|s| s.to_string()),
         };
         let primary_driver = drivers::create_driver(&driver_config)
             .map_err(|e| KernelError::BootFailed(format!("LLM driver init failed: {e}")))?;
@@ -541,7 +543,9 @@ impl OpenFangKernel {
                     } else {
                         std::env::var(&fb.api_key_env).ok()
                     },
-                    base_url: fb.base_url.clone(),
+                    base_url: fb.base_url.as_deref()
+                        .or_else(|| config.provider_urls.get(&fb.provider).map(|s| s.as_str()))
+                        .map(|s| s.to_string()),
                 };
                 match drivers::create_driver(&fb_config) {
                     Ok(d) => {
@@ -599,6 +603,15 @@ impl OpenFangKernel {
                 "applied {} provider URL override(s)",
                 config.provider_urls.len()
             );
+        }
+        // Sync default_model.base_url into catalog for health probe accuracy.
+        // provider_urls takes precedence if it already has an entry for this provider.
+        if let Some(ref url) = config.default_model.base_url {
+            let provider = &config.default_model.provider;
+            if !config.provider_urls.contains_key(provider.as_str()) {
+                model_catalog.set_provider_url(provider, url);
+                info!("applied default_model.base_url to catalog provider={}", provider);
+            }
         }
         let available_count = model_catalog.available_models().len();
         let total_count = model_catalog.list_models().len();
@@ -3451,6 +3464,16 @@ impl OpenFangKernel {
         );
     }
 
+    /// Resolve the effective base URL for a provider, following the precedence chain:
+    ///   1. `explicit_url` — per-agent manifest or default_model override (highest priority)
+    ///   2. `config.provider_urls[provider]` — provider-level override from config
+    ///   3. `None` — delegates to `create_driver` which uses hardcoded default
+    fn resolve_base_url(&self, explicit_url: Option<&str>, provider: &str) -> Option<String> {
+        explicit_url
+            .map(|u| u.to_string())
+            .or_else(|| self.config.provider_urls.get(provider).cloned())
+    }
+
     /// Resolve the LLM driver for an agent.
     ///
     /// If the agent's manifest specifies a different provider than the kernel default,
@@ -3499,7 +3522,10 @@ impl OpenFangKernel {
             let driver_config = DriverConfig {
                 provider: agent_provider.clone(),
                 api_key: std::env::var(&api_key_env).ok(),
-                base_url: manifest.model.base_url.clone(),
+                base_url: self.resolve_base_url(
+                    manifest.model.base_url.as_deref(),
+                    agent_provider,
+                ),
             };
 
             drivers::create_driver(&driver_config).map_err(|e| {
@@ -3517,7 +3543,7 @@ impl OpenFangKernel {
                         .api_key_env
                         .as_ref()
                         .and_then(|env| std::env::var(env).ok()),
-                    base_url: fb.base_url.clone(),
+                    base_url: self.resolve_base_url(fb.base_url.as_deref(), &fb.provider),
                 };
                 match drivers::create_driver(&config) {
                     Ok(d) => chain.push(d),

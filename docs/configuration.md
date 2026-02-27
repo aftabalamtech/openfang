@@ -23,6 +23,7 @@ Complete reference for `config.toml`, covering every configurable field in the O
   - [Channel Overrides](#channel-overrides)
 - [Environment Variables](#environment-variables)
 - [Validation](#validation)
+- [Remote Ollama Setup](#remote-ollama-setup)
 
 ---
 
@@ -96,6 +97,13 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "https://api.anthropic.com"  # Optional override
+
+# --- Provider URL Overrides (optional) ---
+# Override base URLs for any provider — useful for remote/self-hosted inference.
+# The URL must include the /v1 suffix for OpenAI-compatible endpoints.
+# [provider_urls]
+# ollama = "http://192.168.1.100:11434/v1"   # Remote Ollama on LAN
+# vllm = "http://gpu-server.local:8000/v1"   # vLLM on a GPU server
 
 # --- Fallback Providers ---
 [[fallback_providers]]
@@ -271,6 +279,50 @@ api_key_env = "ANTHROPIC_API_KEY"
 | `model` | string | `"claude-sonnet-4-20250514"` | Model identifier. Aliases like `sonnet`, `haiku`, `gpt-4o`, `gemini-flash` are resolved by the model catalog. |
 | `api_key_env` | string | `"ANTHROPIC_API_KEY"` | Name of the environment variable holding the API key. The actual key is read from this env var at runtime, never stored in config. |
 | `base_url` | string or null | `null` | Override the API base URL. Useful for proxies or self-hosted endpoints. When `null`, the provider's default URL from the model catalog is used. |
+
+#### Remote Ollama Setup
+
+Ollama can run on a separate machine (e.g., a dedicated GPU box on your LAN) and OpenFang can connect to it over the network. There are two equivalent ways to configure this.
+
+**Option 1 — `[provider_urls]` (recommended)**
+
+The `[provider_urls]` table maps provider names to base URL overrides and applies globally to all agents:
+
+```toml
+# Remote Ollama on another machine (e.g., 192.168.1.100)
+[provider_urls]
+ollama = "http://192.168.1.100:11434/v1"
+```
+
+**Option 2 — `[default_model] base_url`**
+
+Set `base_url` directly on the model config for the same effect:
+
+```toml
+[default_model]
+provider = "ollama"
+model = "llama3.2:latest"
+api_key_env = ""
+base_url = "http://192.168.1.100:11434/v1"
+```
+
+> **Important:** The URL must end with `/v1`. Ollama's OpenAI-compatible endpoint is at `/v1/chat/completions`. The URL `http://host:11434` (without `/v1`) will result in 404 errors.
+
+The same `/v1` suffix requirement applies to other self-hosted OpenAI-compatible servers (vLLM, LM Studio, etc.).
+
+#### `[provider_urls]`
+
+An optional table that overrides the default base URL for any provider. Keys are provider names (matching the `provider` field in `[default_model]` and `[[fallback_providers]]`). Values are the full base URL including the `/v1` path segment for OpenAI-compatible servers.
+
+```toml
+[provider_urls]
+ollama = "http://192.168.1.100:11434/v1"
+vllm = "http://gpu-server.local:8000/v1"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `<provider_name>` | string | (catalog default) | Base URL override for the named provider. Must include the `/v1` path suffix for OpenAI-compatible endpoints. |
 
 ---
 
