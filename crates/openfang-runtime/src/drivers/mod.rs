@@ -17,7 +17,7 @@ use openfang_types::model_catalog::{
     MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL, OPENAI_BASE_URL,
     OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
     REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
-    ZHIPU_BASE_URL,
+    ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
 };
 use std::sync::Arc;
 
@@ -149,6 +149,11 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
         }),
         "zhipu" | "glm" => Some(ProviderDefaults {
             base_url: ZHIPU_BASE_URL,
+            api_key_env: "ZHIPU_API_KEY",
+            key_required: true,
+        }),
+        "zhipu_coding" => Some(ProviderDefaults {
+            base_url: ZHIPU_CODING_BASE_URL,
             api_key_env: "ZHIPU_API_KEY",
             key_required: true,
         }),
@@ -317,6 +322,7 @@ pub fn known_providers() -> &'static [&'static str] {
         "qwen",
         "minimax",
         "zhipu",
+        "zhipu_coding",
         "qianfan",
     ]
 }
@@ -409,8 +415,9 @@ mod tests {
         assert!(providers.contains(&"qwen"));
         assert!(providers.contains(&"minimax"));
         assert!(providers.contains(&"zhipu"));
+        assert!(providers.contains(&"zhipu_coding"));
         assert!(providers.contains(&"qianfan"));
-        assert_eq!(providers.len(), 26);
+        assert_eq!(providers.len(), 27);
     }
 
     #[test]
