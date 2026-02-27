@@ -6779,6 +6779,11 @@ pub async fn update_agent_identity(
 // Agent Config Hot-Update
 // ---------------------------------------------------------------------------
 
+// SECURITY: Reject oversized agent fields to prevent storage abuse.
+const MAX_AGENT_NAME_LEN: usize = 256;
+const MAX_AGENT_DESCRIPTION_LEN: usize = 4096;
+const MAX_SYSTEM_PROMPT_LEN: usize = 64 * 1024; // 64KB
+
 /// Request body for patching agent config (name, description, prompt, identity).
 #[derive(serde::Deserialize)]
 pub struct PatchAgentConfigRequest {
@@ -6808,6 +6813,36 @@ pub async fn patch_agent_config(
             );
         }
     };
+
+    // SECURITY: Reject oversized fields to prevent storage abuse.
+    if let Some(ref name) = req.name {
+        if name.len() > MAX_AGENT_NAME_LEN {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(
+                    serde_json::json!({"error": format!("Name too long (max {} chars)", MAX_AGENT_NAME_LEN)}),
+                ),
+            );
+        }
+    }
+    if let Some(ref desc) = req.description {
+        if desc.len() > MAX_AGENT_DESCRIPTION_LEN {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(
+                    serde_json::json!({"error": format!("Description too long (max {} chars)", MAX_AGENT_DESCRIPTION_LEN)}),
+                ),
+            );
+        }
+    }
+    if let Some(ref prompt) = req.system_prompt {
+        if prompt.len() > MAX_SYSTEM_PROMPT_LEN {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(serde_json::json!({"error": "System prompt too large (max 64KB)"})),
+            );
+        }
+    }
 
     // Validate color format if provided
     if let Some(ref color) = req.color {
@@ -6952,6 +6987,14 @@ pub async fn clone_agent(
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "new_name cannot be empty"})),
+        );
+    }
+    if req.new_name.len() > MAX_AGENT_NAME_LEN {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(
+                serde_json::json!({"error": format!("Name too long (max {} chars)", MAX_AGENT_NAME_LEN)}),
+            ),
         );
     }
 
