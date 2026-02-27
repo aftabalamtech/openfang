@@ -278,8 +278,9 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
             chunks.push(remaining);
             break;
         }
-        // Try to split at a newline near the boundary
-        let split_at = remaining[..max_len].rfind('\n').unwrap_or(max_len);
+        // Try to split at a newline near the boundary (safe for multi-byte UTF-8)
+        let safe_max = remaining.floor_char_boundary(max_len);
+        let split_at = remaining[..safe_max].rfind('\n').unwrap_or(safe_max);
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk);
         // Skip the newline (and optional \r) we split on
