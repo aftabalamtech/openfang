@@ -14,16 +14,46 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
 
+/// Build OAuth client IDs with optional config overrides.
+///
+/// Any `Some` value overrides the default placeholder for that provider.
+/// This allows users to set real client IDs in `[oauth]` config while
+/// falling back to safe placeholders for unconfigured providers.
+pub fn client_ids(
+    google: Option<&str>,
+    github: Option<&str>,
+    microsoft: Option<&str>,
+    slack: Option<&str>,
+) -> HashMap<&'static str, String> {
+    let mut m = HashMap::new();
+    m.insert(
+        "google",
+        google.unwrap_or("openfang-google-client-id").to_string(),
+    );
+    m.insert(
+        "github",
+        github.unwrap_or("openfang-github-client-id").to_string(),
+    );
+    m.insert(
+        "microsoft",
+        microsoft
+            .unwrap_or("openfang-microsoft-client-id")
+            .to_string(),
+    );
+    m.insert(
+        "slack",
+        slack.unwrap_or("openfang-slack-client-id").to_string(),
+    );
+    m
+}
+
 /// Default OAuth client IDs for public PKCE flows.
 /// These are safe to embed — PKCE doesn't require a client_secret.
-pub fn default_client_ids() -> HashMap<&'static str, &'static str> {
-    let mut m = HashMap::new();
-    // Placeholder IDs — users should configure their own via config
-    m.insert("google", "openfang-google-client-id");
-    m.insert("github", "openfang-github-client-id");
-    m.insert("microsoft", "openfang-microsoft-client-id");
-    m.insert("slack", "openfang-slack-client-id");
-    m
+///
+/// Returns placeholder IDs. For real client IDs, use [`client_ids`] with
+/// values from the `[oauth]` config section.
+pub fn default_client_ids() -> HashMap<&'static str, String> {
+    client_ids(None, None, None, None)
 }
 
 /// OAuth2 token response (raw from provider, for deserialization).
@@ -326,11 +356,27 @@ mod tests {
     }
 
     #[test]
-    fn default_client_ids_populated() {
+    fn client_ids_uses_config_override() {
+        let ids = client_ids(Some("real-google-id"), None, None, None);
+        assert_eq!(ids["google"], "real-google-id");
+        assert_eq!(ids["github"], "openfang-github-client-id");
+    }
+
+    #[test]
+    fn client_ids_all_overrides() {
+        let ids = client_ids(Some("g-id"), Some("gh-id"), Some("ms-id"), Some("sl-id"));
+        assert_eq!(ids["google"], "g-id");
+        assert_eq!(ids["github"], "gh-id");
+        assert_eq!(ids["microsoft"], "ms-id");
+        assert_eq!(ids["slack"], "sl-id");
+    }
+
+    #[test]
+    fn default_client_ids_returns_placeholders() {
         let ids = default_client_ids();
-        assert!(ids.contains_key("google"));
-        assert!(ids.contains_key("github"));
-        assert!(ids.contains_key("microsoft"));
-        assert!(ids.contains_key("slack"));
+        assert_eq!(ids["google"], "openfang-google-client-id");
+        assert_eq!(ids["github"], "openfang-github-client-id");
+        assert_eq!(ids["microsoft"], "openfang-microsoft-client-id");
+        assert_eq!(ids["slack"], "openfang-slack-client-id");
     }
 }
