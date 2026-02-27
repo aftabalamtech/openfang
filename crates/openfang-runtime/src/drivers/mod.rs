@@ -15,9 +15,9 @@ use openfang_types::model_catalog::{
     AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, COHERE_BASE_URL, DEEPSEEK_BASE_URL,
     FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL, LMSTUDIO_BASE_URL,
     MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL, OPENAI_BASE_URL,
-    OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
-    REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
-    ZHIPU_BASE_URL,
+    OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL, REPLICATE_BASE_URL,
+    SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL, ZAI_BASE_URL,
+    ZAI_GLOBAL_BASE_URL, ZHIPU_BASE_URL,
 };
 use std::sync::Arc;
 
@@ -152,6 +152,16 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
             api_key_env: "ZHIPU_API_KEY",
             key_required: true,
         }),
+        "zai" | "z.ai" => Some(ProviderDefaults {
+            base_url: ZAI_BASE_URL,
+            api_key_env: "ZAI_API_KEY",
+            key_required: true,
+        }),
+        "zai-global" | "zai_global" | "z.ai-global" => Some(ProviderDefaults {
+            base_url: ZAI_GLOBAL_BASE_URL,
+            api_key_env: "ZAI_GLOBAL_API_KEY",
+            key_required: true,
+        }),
         "qianfan" | "baidu" => Some(ProviderDefaults {
             base_url: QIANFAN_BASE_URL,
             api_key_env: "QIANFAN_API_KEY",
@@ -251,6 +261,13 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .api_key
             .clone()
             .or_else(|| std::env::var(defaults.api_key_env).ok())
+            .or_else(|| {
+                if provider == "zai-global" {
+                    std::env::var("ZAI_API_KEY").ok()
+                } else {
+                    None
+                }
+            })
             .unwrap_or_default();
 
         if defaults.key_required && api_key.is_empty() {
@@ -282,7 +299,8 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         message: format!(
             "Unknown provider '{}'. Supported: anthropic, gemini, openai, groq, openrouter, \
              deepseek, together, mistral, fireworks, ollama, vllm, lmstudio, perplexity, \
-             cohere, ai21, cerebras, sambanova, huggingface, xai, replicate, github-copilot. \
+             cohere, ai21, cerebras, sambanova, huggingface, xai, replicate, github-copilot, \
+             moonshot, qwen, minimax, zhipu, qianfan, zai, zai-global. \
              Or set base_url for a custom OpenAI-compatible endpoint.",
             provider
         ),
@@ -317,6 +335,8 @@ pub fn known_providers() -> &'static [&'static str] {
         "qwen",
         "minimax",
         "zhipu",
+        "zai",
+        "zai-global",
         "qianfan",
     ]
 }
@@ -409,8 +429,10 @@ mod tests {
         assert!(providers.contains(&"qwen"));
         assert!(providers.contains(&"minimax"));
         assert!(providers.contains(&"zhipu"));
+        assert!(providers.contains(&"zai"));
+        assert!(providers.contains(&"zai-global"));
         assert!(providers.contains(&"qianfan"));
-        assert_eq!(providers.len(), 26);
+        assert_eq!(providers.len(), 28);
     }
 
     #[test]
@@ -449,5 +471,18 @@ mod tests {
         assert_eq!(d.base_url, "https://api-inference.huggingface.co/v1");
         assert_eq!(d.api_key_env, "HF_API_KEY");
         assert!(d.key_required);
+    }
+
+    #[test]
+    fn test_provider_defaults_zai_variants() {
+        let d = provider_defaults("zai").unwrap();
+        assert_eq!(d.base_url, "https://api.z.ai/api/paas/v4");
+        assert_eq!(d.api_key_env, "ZAI_API_KEY");
+        assert!(d.key_required);
+
+        let g = provider_defaults("zai-global").unwrap();
+        assert_eq!(g.base_url, "https://api.z.ai/api/coding/paas/v4");
+        assert_eq!(g.api_key_env, "ZAI_GLOBAL_API_KEY");
+        assert!(g.key_required);
     }
 }

@@ -68,6 +68,18 @@ const PROVIDERS: &[ProviderInfo] = &[
         needs_key: true,
     },
     ProviderInfo {
+        name: "zai",
+        env_var: "ZAI_API_KEY",
+        default_model: "glm-5",
+        needs_key: true,
+    },
+    ProviderInfo {
+        name: "zai-global",
+        env_var: "ZAI_GLOBAL_API_KEY",
+        default_model: "glm-4.5-air",
+        needs_key: true,
+    },
+    ProviderInfo {
         name: "ollama",
         env_var: "OLLAMA_API_KEY",
         default_model: "llama3.2",

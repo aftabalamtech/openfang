@@ -1224,6 +1224,13 @@ fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static st
             "openrouter/auto",
             "OpenRouter",
         ),
+        ("zai", "ZAI_API_KEY", "glm-5", "Z.AI"),
+        (
+            "zai-global",
+            "ZAI_GLOBAL_API_KEY",
+            "glm-4.5-air",
+            "Z.AI Global",
+        ),
     ]
 }
 
@@ -3712,6 +3719,8 @@ fn provider_to_env_var(provider: &str) -> String {
         "perplexity" => "PERPLEXITY_API_KEY".to_string(),
         "cohere" => "COHERE_API_KEY".to_string(),
         "xai" => "XAI_API_KEY".to_string(),
+        "zai" | "z.ai" => "ZAI_API_KEY".to_string(),
+        "zai-global" | "zai_global" | "z.ai-global" => "ZAI_GLOBAL_API_KEY".to_string(),
         "brave" => "BRAVE_API_KEY".to_string(),
         "tavily" => "TAVILY_API_KEY".to_string(),
         other => format!("{}_API_KEY", other.to_uppercase()),
@@ -3761,6 +3770,14 @@ pub(crate) fn test_api_key(provider: &str, env_var: &str) -> bool {
             .send(),
         "openrouter" => client
             .get("https://openrouter.ai/api/v1/models")
+            .bearer_auth(&key)
+            .send(),
+        "zai" | "z.ai" => client
+            .get("https://api.z.ai/api/paas/v4/models")
+            .bearer_auth(&key)
+            .send(),
+        "zai-global" | "zai_global" | "z.ai-global" => client
+            .get("https://api.z.ai/api/coding/paas/v4/models")
             .bearer_auth(&key)
             .send(),
         _ => return true, // unknown provider — skip test

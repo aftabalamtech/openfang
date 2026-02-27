@@ -265,11 +265,11 @@ Each adapter supports per-channel model overrides, DM/group policies, rate limit
 
 ---
 
-## 27 LLM Providers — 123+ Models
+## 29 LLM Providers — 130+ Models
 
-3 native drivers (Anthropic, Gemini, OpenAI-compatible) route to 27 providers:
+3 native drivers (Anthropic, Gemini, OpenAI-compatible) route to 29 providers:
 
-Anthropic, Gemini, OpenAI, Groq, DeepSeek, OpenRouter, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, HuggingFace, Replicate, Ollama, vLLM, LM Studio, Qwen, MiniMax, Zhipu, Moonshot, Qianfan, Bedrock, and more.
+Anthropic, Gemini, OpenAI, Groq, DeepSeek, OpenRouter, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, HuggingFace, Replicate, Ollama, vLLM, LM Studio, Qwen, MiniMax, Zhipu, Z.AI, Z.AI Global, Moonshot, Qianfan, Bedrock, and more.
 
 Intelligent routing with task complexity scoring, automatic fallback, cost tracking, and per-model pricing.
 

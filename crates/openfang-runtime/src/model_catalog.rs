@@ -1,6 +1,6 @@
 //! Model catalog — registry of known models with metadata, pricing, and auth detection.
 //!
-//! Provides a comprehensive catalog of 130+ builtin models across 27 providers,
+//! Provides a comprehensive catalog of 130+ builtin models across 29 providers,
 //! with alias resolution, auth status detection, and pricing lookups.
 
 use openfang_types::model_catalog::{
@@ -10,7 +10,7 @@ use openfang_types::model_catalog::{
     LMSTUDIO_BASE_URL, MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL,
     OPENAI_BASE_URL, OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
     REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
-    ZHIPU_BASE_URL,
+    ZAI_BASE_URL, ZAI_GLOBAL_BASE_URL, ZHIPU_BASE_URL,
 };
 use std::collections::HashMap;
 
@@ -53,6 +53,9 @@ impl ModelCatalog {
             } else {
                 // Special case: Gemini also accepts GOOGLE_API_KEY
                 if provider.id == "gemini" && std::env::var("GOOGLE_API_KEY").is_ok() {
+                    provider.auth_status = AuthStatus::Configured;
+                // Special case: Z.AI Global can reuse ZAI_API_KEY
+                } else if provider.id == "zai-global" && std::env::var("ZAI_API_KEY").is_ok() {
                     provider.auth_status = AuthStatus::Configured;
                 } else {
                     provider.auth_status = AuthStatus::Missing;
@@ -409,6 +412,24 @@ fn builtin_providers() -> Vec<ProviderInfo> {
             display_name: "Zhipu AI (GLM)".into(),
             api_key_env: "ZHIPU_API_KEY".into(),
             base_url: ZHIPU_BASE_URL.into(),
+            key_required: true,
+            auth_status: AuthStatus::Missing,
+            model_count: 0,
+        },
+        ProviderInfo {
+            id: "zai".into(),
+            display_name: "Z.AI".into(),
+            api_key_env: "ZAI_API_KEY".into(),
+            base_url: ZAI_BASE_URL.into(),
+            key_required: true,
+            auth_status: AuthStatus::Missing,
+            model_count: 0,
+        },
+        ProviderInfo {
+            id: "zai-global".into(),
+            display_name: "Z.AI Global (Coding)".into(),
+            api_key_env: "ZAI_GLOBAL_API_KEY".into(),
+            base_url: ZAI_GLOBAL_BASE_URL.into(),
             key_required: true,
             auth_status: AuthStatus::Missing,
             model_count: 0,
@@ -2115,8 +2136,53 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec![],
         },
         // ══════════════════════════════════════════════════════════════
-        // Moonshot / Kimi (3)
+        // Z.AI (3)
         // ══════════════════════════════════════════════════════════════
+        // Z.AI (official OpenAI-compatible endpoint)
+        ModelCatalogEntry {
+            id: "glm-5".into(),
+            display_name: "GLM-5".into(),
+            provider: "zai".into(),
+            tier: ModelTier::Frontier,
+            context_window: 131_072,
+            max_output_tokens: 8_192,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: true,
+            supports_vision: true,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "glm-4.7".into(),
+            display_name: "GLM-4.7".into(),
+            provider: "zai".into(),
+            tier: ModelTier::Smart,
+            context_window: 128_000,
+            max_output_tokens: 8_192,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: true,
+            supports_vision: true,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        // Z.AI Global coding plan endpoint
+        ModelCatalogEntry {
+            id: "glm-4.5-air".into(),
+            display_name: "GLM-4.5 Air".into(),
+            provider: "zai-global".into(),
+            tier: ModelTier::Fast,
+            context_window: 128_000,
+            max_output_tokens: 8_192,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: true,
+            supports_vision: true,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        // Moonshot / Kimi (3)
         ModelCatalogEntry {
             id: "moonshot-v1-128k".into(),
             display_name: "Moonshot V1 128K".into(),
@@ -2307,7 +2373,7 @@ mod tests {
     #[test]
     fn test_catalog_has_providers() {
         let catalog = ModelCatalog::new();
-        assert_eq!(catalog.list_providers().len(), 27);
+        assert_eq!(catalog.list_providers().len(), 29);
     }
 
     #[test]
@@ -2525,6 +2591,8 @@ mod tests {
         assert!(catalog.get_provider("qwen").is_some());
         assert!(catalog.get_provider("minimax").is_some());
         assert!(catalog.get_provider("zhipu").is_some());
+        assert!(catalog.get_provider("zai").is_some());
+        assert!(catalog.get_provider("zai-global").is_some());
         assert!(catalog.get_provider("moonshot").is_some());
         assert!(catalog.get_provider("qianfan").is_some());
         assert!(catalog.get_provider("bedrock").is_some());

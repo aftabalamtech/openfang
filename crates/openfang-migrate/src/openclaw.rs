@@ -646,6 +646,8 @@ fn map_provider(openclaw_provider: &str) -> String {
         "fireworks" => "fireworks".to_string(),
         "google" | "gemini" => "google".to_string(),
         "xai" | "grok" => "xai".to_string(),
+        "z.ai" | "zai" => "zai".to_string(),
+        "z.ai-global" | "zai-global" | "zai_global" => "zai-global".to_string(),
         "cerebras" => "cerebras".to_string(),
         "sambanova" => "sambanova".to_string(),
         other => other.to_string(),
@@ -665,6 +667,8 @@ fn default_api_key_env(provider: &str) -> String {
         "fireworks" => "FIREWORKS_API_KEY".to_string(),
         "google" => "GOOGLE_API_KEY".to_string(),
         "xai" => "XAI_API_KEY".to_string(),
+        "zai" => "ZAI_API_KEY".to_string(),
+        "zai-global" => "ZAI_GLOBAL_API_KEY".to_string(),
         "cerebras" => "CEREBRAS_API_KEY".to_string(),
         "sambanova" => "SAMBANOVA_API_KEY".to_string(),
         "ollama" => String::new(), // Ollama doesn't need an API key

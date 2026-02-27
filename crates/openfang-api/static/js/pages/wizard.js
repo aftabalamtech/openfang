@@ -320,7 +320,7 @@ function wizardPage() {
     },
 
     get popularProviders() {
-      var popular = ['anthropic', 'openai', 'gemini', 'groq', 'deepseek', 'openrouter'];
+      var popular = ['anthropic', 'openai', 'gemini', 'groq', 'deepseek', 'openrouter', 'zai', 'zai-global'];
       return this.providers.filter(function(p) {
         return popular.indexOf(p.id) >= 0;
       }).sort(function(a, b) {
@@ -329,7 +329,7 @@ function wizardPage() {
     },
 
     get otherProviders() {
-      var popular = ['anthropic', 'openai', 'gemini', 'groq', 'deepseek', 'openrouter'];
+      var popular = ['anthropic', 'openai', 'gemini', 'groq', 'deepseek', 'openrouter', 'zai', 'zai-global'];
       return this.providers.filter(function(p) {
         return popular.indexOf(p.id) < 0;
       });
@@ -350,6 +350,8 @@ function wizardPage() {
         groq: { url: 'https://console.groq.com/keys', text: 'Get your key from the Groq Console (free tier available)' },
         deepseek: { url: 'https://platform.deepseek.com/api_keys', text: 'Get your key from the DeepSeek Platform (very affordable)' },
         openrouter: { url: 'https://openrouter.ai/keys', text: 'Get your key from OpenRouter (access 100+ models with one key)' },
+        zai: { url: 'https://docs.z.ai/api-reference/introduction', text: 'Get your key from Z.AI dashboard and use OpenAI-compatible API' },
+        'zai-global': { url: 'https://docs.z.ai/guides/coding-plan/overview', text: 'Use Z.AI Coding Global plan endpoint for coding-focused workloads' },
         mistral: { url: 'https://console.mistral.ai/api-keys', text: 'Get your key from the Mistral Console' },
         together: { url: 'https://api.together.xyz/settings/api-keys', text: 'Get your key from Together AI' },
         fireworks: { url: 'https://fireworks.ai/account/api-keys', text: 'Get your key from Fireworks AI' },
@@ -468,6 +470,8 @@ function wizardPage() {
         gemini: 'gemini-2.5-flash',
         groq: 'llama-3.3-70b-versatile',
         deepseek: 'deepseek-chat',
+        zai: 'glm-5',
+        'zai-global': 'glm-4.5-air',
         openrouter: 'openrouter/auto',
         mistral: 'mistral-large-latest',
         together: 'meta-llama/Llama-3-70b-chat-hf',
