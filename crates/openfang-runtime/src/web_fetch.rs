@@ -140,15 +140,28 @@ pub(crate) fn check_ssrf(url: &str) -> Result<(), String> {
     }
 
     let host = extract_host(url);
-    let hostname = host.split(':').next().unwrap_or(&host);
+    // IPv6 addresses use bracket notation: [::1]:8080
+    // Must extract the bracketed part (including brackets) as the hostname
+    let hostname = if host.starts_with('[') {
+        // Find closing bracket; hostname is everything up to and including ']'
+        host.split(']').next().map(|s| &host[..s.len() + 1]).unwrap_or(&host)
+    } else {
+        host.split(':').next().unwrap_or(&host)
+    };
 
     // Hostname-based blocklist (catches metadata endpoints)
     let blocked = [
         "localhost",
+        "ip6-localhost",
         "metadata.google.internal",
         "metadata.aws.internal",
         "instance-data",
-        "169.254.169.254",
+        "169.254.169.254",        // AWS/GCP IMDSv1
+        "100.100.100.200",        // Alibaba Cloud metadata
+        "192.0.0.192",            // Azure legacy metadata (IMDS)
+        "0.0.0.0",                // Unspecified IPv4
+        "::1",                    // IPv6 loopback
+        "[::1]",                  // IPv6 loopback (bracketed URL form)
     ];
     if blocked.contains(&hostname) {
         return Err(format!("SSRF blocked: {hostname} is a restricted hostname"));
@@ -244,5 +257,23 @@ mod tests {
         assert!(check_ssrf("file:///etc/passwd").is_err());
         assert!(check_ssrf("ftp://internal.corp/data").is_err());
         assert!(check_ssrf("gopher://evil.com").is_err());
+    }
+
+    #[test]
+    fn ssrf_blocks_alibaba_metadata() {
+        let result = check_ssrf("http://100.100.100.200/latest/meta-data/");
+        assert!(result.is_err(), "Should block Alibaba Cloud metadata");
+    }
+
+    #[test]
+    fn ssrf_blocks_ipv6_localhost() {
+        let result = check_ssrf("http://[::1]:8080/");
+        assert!(result.is_err(), "Should block IPv6 localhost");
+    }
+
+    #[test]
+    fn ssrf_blocks_zero_ip() {
+        let result = check_ssrf("http://0.0.0.0/");
+        assert!(result.is_err(), "Should block 0.0.0.0");
     }
 }
