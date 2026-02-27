@@ -520,12 +520,13 @@ pub fn tool_hint(name: &str) -> &'static str {
 // Utilities
 // ---------------------------------------------------------------------------
 
-/// Cap a string to `max_chars`, appending "..." if truncated.
+/// Cap a string to `max_chars`, appending "..." if truncated (UTF-8 safe).
 fn cap_str(s: &str, max_chars: usize) -> String {
     if s.len() <= max_chars {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_chars])
+        let end = s.floor_char_boundary(max_chars);
+        format!("{}...", &s[..end])
     }
 }
 

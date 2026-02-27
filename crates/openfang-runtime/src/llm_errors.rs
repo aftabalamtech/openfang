@@ -339,7 +339,7 @@ pub fn sanitize_for_user(category: LlmErrorCategory, _raw: &str) -> String {
     };
     // Cap at 200 chars (all built-in messages are under 200, but defensive).
     if msg.len() > 200 {
-        format!("{}...", &msg[..197])
+        format!("{}...", &msg[..msg.floor_char_boundary(197)])
     } else {
         msg.to_string()
     }

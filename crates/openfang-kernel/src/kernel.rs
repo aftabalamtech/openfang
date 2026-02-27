@@ -411,9 +411,10 @@ fn append_daily_memory_log(workspace: &Path, response: &str) {
             return;
         }
     }
-    // Truncate long responses for the log
+    // Truncate long responses for the log (char-boundary safe for UTF-8)
     let summary = if trimmed.len() > 500 {
-        &trimmed[..500]
+        let end = trimmed.floor_char_boundary(500);
+        &trimmed[..end]
     } else {
         trimmed
     };
@@ -2183,7 +2184,7 @@ impl OpenFangKernel {
                 .take(5)
                 .enumerate()
                 .map(|(i, t)| {
-                    let truncated = if t.len() > 200 { &t[..200] } else { t };
+                    let truncated = if t.len() > 200 { &t[..t.floor_char_boundary(200)] } else { t };
                     format!("{}. {}", i + 1, truncated)
                 })
                 .collect::<Vec<_>>()

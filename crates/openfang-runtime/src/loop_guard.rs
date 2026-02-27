@@ -521,7 +521,7 @@ impl LoopGuard {
         hasher.update(params_str.as_bytes());
         hasher.update(b"|");
         let truncated = if result.len() > 1000 {
-            &result[..1000]
+            &result[..result.floor_char_boundary(1000)]
         } else {
             result
         };

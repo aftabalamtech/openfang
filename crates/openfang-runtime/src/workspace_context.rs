@@ -146,7 +146,7 @@ impl WorkspaceContext {
             if let Some(content) = self.get_file(&name) {
                 // Take first 200 chars as preview
                 let preview = if content.len() > 200 {
-                    format!("{}...", &content[..200])
+                    format!("{}...", &content[..content.floor_char_boundary(200)])
                 } else {
                     content.to_string()
                 };

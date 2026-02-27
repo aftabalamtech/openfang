@@ -373,7 +373,7 @@ fn build_conversation_text(messages: &[Message], config: &CompactionConfig) -> S
                         ContentBlock::ToolUse { name, input, .. } => {
                             let input_str = serde_json::to_string(input).unwrap_or_default();
                             let input_preview = if input_str.len() > 200 {
-                                format!("{}...", &input_str[..200])
+                                format!("{}...", &input_str[..input_str.floor_char_boundary(200)])
                             } else {
                                 input_str
                             };
@@ -388,7 +388,7 @@ fn build_conversation_text(messages: &[Message], config: &CompactionConfig) -> S
                             // Strip base64 blobs and injection markers before compaction
                             let cleaned = crate::session_repair::strip_tool_result_details(content);
                             let preview = if cleaned.len() > 2000 {
-                                format!("{}...", &cleaned[..2000])
+                                format!("{}...", &cleaned[..cleaned.floor_char_boundary(2000)])
                             } else {
                                 cleaned
                             };
@@ -886,7 +886,7 @@ mod tests {
         assert!(input_str.len() > 200);
         // Just verify the truncation logic works correctly
         let preview = if input_str.len() > 200 {
-            format!("{}...", &input_str[..200])
+            format!("{}...", &input_str[..input_str.floor_char_boundary(200)])
         } else {
             input_str.clone()
         };

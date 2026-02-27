@@ -430,7 +430,7 @@ impl SessionStore {
                     if !text.is_empty() {
                         // Truncate individual messages in summary to keep it compact
                         let truncated = if text.len() > 200 {
-                            format!("{}...", &text[..200])
+                            format!("{}...", &text[..text.floor_char_boundary(200)])
                         } else {
                             text
                         };

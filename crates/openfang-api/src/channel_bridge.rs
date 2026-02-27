@@ -894,7 +894,7 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
             let desc = &card.description;
             if !desc.is_empty() {
                 let short = if desc.len() > 60 {
-                    &desc[..60]
+                    &desc[..desc.floor_char_boundary(60)]
                 } else {
                     desc.as_str()
                 };

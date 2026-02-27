@@ -46,7 +46,7 @@ pub async fn generate_image(request: &ImageGenRequest) -> Result<ImageGenResult,
         let error_body = response.text().await.unwrap_or_default();
         // SECURITY: don't include full error body which might contain key info
         let truncated = if error_body.len() > 500 {
-            &error_body[..500]
+            &error_body[..error_body.floor_char_boundary(500)]
         } else {
             &error_body
         };
