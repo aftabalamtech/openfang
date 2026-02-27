@@ -3175,6 +3175,12 @@ fn cmd_skill_create() {
         std::process::exit(1);
     });
 
+    let (entry_file, manifest_entry) = match runtime.as_str() {
+        "node" => ("src/index.js", "src/index.js"),
+        "wasm" => ("src/lib.rs", "src/lib.rs"),
+        _ => ("src/main.py", "src/main.py"),
+    };
+
     let manifest = format!(
         r#"[skill]
 name = "{name}"
@@ -3186,7 +3192,7 @@ tags = []
 
 [runtime]
 type = "{runtime}"
-entry = "src/main.py"
+entry = "{manifest_entry}"
 
 [[tools.provided]]
 name = "{tool_name}"
@@ -3224,20 +3230,85 @@ if __name__ == "__main__":
     main()
 "#
         ),
-        _ => "// TODO: Implement your skill\n".to_string(),
+        "node" => format!(
+            r#"#!/usr/bin/env node
+/**
+ * OpenFang skill: {name}
+ */
+
+async function main() {{
+    const chunks = [];
+    for await (const chunk of process.stdin) {{
+        chunks.push(chunk);
+    }}
+    const payload = JSON.parse(Buffer.concat(chunks).toString());
+    const toolName = payload.tool;
+    const inputData = payload.input;
+
+    // TODO: Implement your skill logic here
+    const result = {{ result: `Processed: ${{inputData.input || ''}}` }};
+
+    process.stdout.write(JSON.stringify(result));
+}}
+
+main().catch(err => {{
+    console.error(err);
+    process.exit(1);
+}});
+"#
+        ),
+        "wasm" => format!(
+            r#"//! OpenFang skill: {name}
+//!
+//! Build: cargo build --target wasm32-wasi --release
+
+use std::io::Read;
+
+fn main() {{
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input).unwrap();
+
+    let payload: serde_json::Value = serde_json::from_str(&input).unwrap();
+    let tool_name = payload["tool"].as_str().unwrap_or("");
+    let input_data = &payload["input"];
+
+    // TODO: Implement your skill logic here
+    let result = serde_json::json!({{
+        "result": format!("Processed: {{}}", input_data["input"].as_str().unwrap_or(""))
+    }});
+
+    println!("{{}}", result);
+}}
+"#
+        ),
+        _ => format!(
+            r#"#!/usr/bin/env python3
+"""OpenFang skill: {name}"""
+import json
+import sys
+
+def main():
+    payload = json.loads(sys.stdin.read())
+    tool_name = payload["tool"]
+    input_data = payload["input"]
+
+    # TODO: Implement your skill logic here
+    result = {{"result": f"Processed: {{input_data.get('input', '')}}"}}
+
+    print(json.dumps(result))
+
+if __name__ == "__main__":
+    main()
+"#
+        ),
     };
 
-    let entry_path = if runtime == "python" {
-        "src/main.py"
-    } else {
-        "src/index.js"
-    };
-    std::fs::write(skill_dir.join(entry_path), entry_content).unwrap();
+    std::fs::write(skill_dir.join(entry_file), entry_content).unwrap();
 
     println!("\nSkill created: {}", skill_dir.display());
     println!("\nFiles:");
     println!("  skill.toml");
-    println!("  {entry_path}");
+    println!("  {entry_file}");
     println!("\nNext steps:");
     println!("  1. Edit the entry point to implement your skill logic");
     println!("  2. Test locally: openfang skill test");
@@ -3245,6 +3316,11 @@ if __name__ == "__main__":
         "  3. Install: openfang skill install {}",
         skill_dir.display()
     );
+    if runtime == "wasm" {
+        println!("\nNote: WASM skills need a Cargo.toml in the skill directory.");
+        println!("  Add serde_json to dependencies and build with:");
+        println!("  cargo build --target wasm32-wasi --release");
+    }
 }
 
 // ---------------------------------------------------------------------------
