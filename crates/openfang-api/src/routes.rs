@@ -107,7 +107,7 @@ pub async fn spawn_agent(
             tracing::warn!("Spawn failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Agent spawn failed"})),
+                Json(serde_json::json!({"error": format!("Agent spawn failed: {e}")})),
             )
         }
     }

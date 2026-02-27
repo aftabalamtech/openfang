@@ -436,13 +436,16 @@ function wizardPage() {
         model = this.defaultModelForProvider(provider) || tpl.model;
       }
 
-      var toml = '[agent]\n';
-      toml += 'name = "' + name.replace(/"/g, '\\"') + '"\n';
+      var validProfiles = ['minimal', 'coding', 'research', 'messaging', 'automation', 'full', 'custom'];
+      var toml = 'name = "' + name.replace(/"/g, '\\"') + '"\n';
       toml += 'description = "' + tpl.description.replace(/"/g, '\\"') + '"\n';
-      toml += 'profile = "' + tpl.profile + '"\n\n';
+      if (validProfiles.indexOf(tpl.profile) !== -1) {
+        toml += 'profile = "' + tpl.profile + '"\n';
+      }
+      toml += '\n';
       toml += '[model]\nprovider = "' + provider + '"\n';
-      toml += 'name = "' + model + '"\n\n';
-      toml += '[prompt]\nsystem = """\n' + tpl.system_prompt + '\n"""\n';
+      toml += 'model = "' + model + '"\n';
+      toml += 'system_prompt = "' + tpl.system_prompt.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"\n';
 
       this.creatingAgent = true;
       try {
