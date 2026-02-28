@@ -13,6 +13,13 @@ use std::path::Path;
 /// Environment variables considered safe to inherit on all platforms.
 pub const SAFE_ENV_VARS: &[&str] = &[
     "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TERM",
+    // Standard HTTP proxy variables. 
+    // If the user's kernel `proxy.tools` config is enabled, these will be strictly explicitly
+    // overridden on a per-Command basis via `inject_shell_proxy_env` anyway.
+    // However, if no proxy config is active, we preserve them so that `shell_exec`
+    // can inherit a system-level HTTP_PROXY set by the actual shell surrounding OpenFang.
+    "HTTP_PROXY",  "HTTPS_PROXY",  "ALL_PROXY",  "NO_PROXY",
+    "http_proxy",  "https_proxy",  "all_proxy",  "no_proxy",
 ];
 
 /// Additional environment variables considered safe on Windows.

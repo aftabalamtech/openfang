@@ -1364,6 +1364,11 @@ async fn tool_shell_exec(
     // Hand settings may grant access to specific provider API keys.
     crate::subprocess_sandbox::sandbox_command(&mut cmd, allowed_env);
 
+    // Inject proxy env vars directly into the Command (thread-safe, per-Command injection).
+    // This runs after sandbox_command's env_clear() so the proxy vars are never lost.
+    // Only injects when [proxy.tools] is enabled in the kernel configuration.
+    crate::http_client::inject_shell_proxy_env(&mut cmd);
+
     // Ensure UTF-8 output on Windows
     #[cfg(windows)]
     cmd.env("PYTHONIOENCODING", "utf-8");

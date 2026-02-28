@@ -14,6 +14,7 @@
 use crate::openclaw_compat;
 use crate::verify::{SkillVerifier, SkillWarning, WarningSeverity};
 use crate::SkillError;
+use openfang_types::config::ProxyConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -247,6 +248,48 @@ impl ClawHubClient {
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),
+            _cache_dir: cache_dir,
+        }
+    }
+
+    /// Create a ClawHub client with proxy support.
+    ///
+    /// Applies the proxy settings from `proxy_config.skills` (falling back to global
+    /// `proxy_config`) when building the HTTP client used for marketplace downloads.
+    /// Respects `no_proxy` exclusions \u2014 hosts listed there will bypass the proxy.
+    pub fn with_proxy(cache_dir: PathBuf, proxy_config: &ProxyConfig) -> Self {
+        let comp = &proxy_config.skills;
+        let use_proxy = comp.is_enabled(proxy_config);
+        let proxy_url = if use_proxy {
+            comp.resolved_url(proxy_config)
+        } else {
+            None
+        };
+
+        let mut builder = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30));
+
+        if let Some(url) = proxy_url {
+            if let Ok(mut proxy) = reqwest::Proxy::all(url) {
+                // Apply authentication if configured
+                if let Some(ref username) = proxy_config.username {
+                    let password = proxy_config.resolved_password().unwrap_or_default();
+                    proxy = proxy.basic_auth(username, &password);
+                }
+                // Apply no_proxy exclusion list \u2014 consistent with build_http_client behaviour
+                if !proxy_config.no_proxy.is_empty() {
+                    let no_proxy_str = proxy_config.no_proxy.join(",");
+                    proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&no_proxy_str));
+                }
+                builder = builder.proxy(proxy);
+            }
+        } else {
+            builder = builder.no_proxy();
+        }
+
+        Self {
+            base_url: "https://clawhub.ai/api/v1".to_string(),
+            client: builder.build().unwrap_or_default(),
             _cache_dir: cache_dir,
         }
     }

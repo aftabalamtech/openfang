@@ -16,6 +16,7 @@ pub mod context_overflow;
 pub mod docker_sandbox;
 pub mod drivers;
 pub mod embedding;
+pub mod http_client;
 pub mod graceful_shutdown;
 pub mod hooks;
 pub mod host_functions;

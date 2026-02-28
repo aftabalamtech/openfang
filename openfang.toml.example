@@ -46,3 +46,30 @@ listen_addr = "127.0.0.1:4200"           # OFP listen address
 # name = "filesystem"
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+# ---------------------------------------------------------------------------
+# HTTP Proxy Configuration
+# ---------------------------------------------------------------------------
+# Controls whether outbound HTTP requests (LLM API calls, skill downloads,
+# web tools) go through a proxy. Useful in restricted network environments
+# or when behind a corporate firewall.
+#
+# [proxy]
+# enabled = true                          # Enable proxy globally (default: false)
+# url = "http://127.0.0.1:7890"          # Proxy URL (http/https/socks5)
+# # username = "user"                    # Optional proxy auth username
+# # password = "pass"                    # Optional inline password (prefer password_env)
+# # password_env = "PROXY_PASSWORD"      # Env var holding proxy password (preferred)
+# # no_proxy = ["localhost", "192.168.0.0/16"]   # Bypass list
+#
+# Per-component overrides (each inherits from global unless specified):
+#
+# [proxy.llm]          # LLM API calls (Anthropic, OpenAI, Gemini, ...)
+# enabled = true       # Force proxy ON for LLM (even if global is false)
+#
+# [proxy.skills]       # ClawHub skill marketplace downloads
+# enabled = false      # Bypass proxy for skill downloads
+#
+# [proxy.tools]        # Built-in tools: web_fetch, web_search, MCP
+# enabled = true
+# url = "http://127.0.0.1:7891"   # Use a different proxy URL for tools
