@@ -2178,11 +2178,11 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec!["copilot-gpt4".into()],
         },
         // ══════════════════════════════════════════════════════════════
-        // ChatGPT Codex (7) — subscription-backed
+        // ChatGPT Codex (5) — subscription-backed
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
             id: "gpt-5.3-codex".into(),
-            display_name: "GPT-5.3 Codex".into(),
+            display_name: "gpt-5.3-codex".into(),
             provider: "chatgpt".into(),
             tier: ModelTier::Frontier,
             context_window: 272_000,
@@ -2196,7 +2196,7 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
         },
         ModelCatalogEntry {
             id: "gpt-5.2-codex".into(),
-            display_name: "GPT-5.2 Codex".into(),
+            display_name: "gpt-5.2-codex".into(),
             provider: "chatgpt".into(),
             tier: ModelTier::Smart,
             context_window: 272_000,
@@ -2210,9 +2210,9 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
         },
         ModelCatalogEntry {
             id: "gpt-5.1-codex-max".into(),
-            display_name: "GPT-5.1 Codex Max".into(),
+            display_name: "gpt-5.1-codex-max".into(),
             provider: "chatgpt".into(),
-            tier: ModelTier::Frontier,
+            tier: ModelTier::Smart,
             context_window: 272_000,
             max_output_tokens: 10_000,
             input_cost_per_m: 0.0,
@@ -2223,10 +2223,10 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec!["gpt51-codex-max".into()],
         },
         ModelCatalogEntry {
-            id: "gpt-5.1-codex".into(),
-            display_name: "GPT-5.1 Codex".into(),
+            id: "gpt-5.2".into(),
+            display_name: "gpt-5.2".into(),
             provider: "chatgpt".into(),
-            tier: ModelTier::Smart,
+            tier: ModelTier::Frontier,
             context_window: 272_000,
             max_output_tokens: 10_000,
             input_cost_per_m: 0.0,
@@ -2234,25 +2234,11 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             supports_tools: true,
             supports_vision: true,
             supports_streaming: true,
-            aliases: vec!["gpt51-codex".into()],
-        },
-        ModelCatalogEntry {
-            id: "gpt-5-codex".into(),
-            display_name: "GPT-5 Codex".into(),
-            provider: "chatgpt".into(),
-            tier: ModelTier::Smart,
-            context_window: 272_000,
-            max_output_tokens: 10_000,
-            input_cost_per_m: 0.0,
-            output_cost_per_m: 0.0,
-            supports_tools: true,
-            supports_vision: true,
-            supports_streaming: true,
-            aliases: vec!["gpt5-codex".into()],
+            aliases: vec!["gpt52-chatgpt".into()],
         },
         ModelCatalogEntry {
             id: "gpt-5.1-codex-mini".into(),
-            display_name: "GPT-5.1 Codex Mini".into(),
+            display_name: "gpt-5.1-codex-mini".into(),
             provider: "chatgpt".into(),
             tier: ModelTier::Fast,
             context_window: 272_000,
@@ -2263,20 +2249,6 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             supports_vision: true,
             supports_streaming: true,
             aliases: vec!["gpt51-codex-mini".into()],
-        },
-        ModelCatalogEntry {
-            id: "gpt-5-codex-mini".into(),
-            display_name: "GPT-5 Codex Mini".into(),
-            provider: "chatgpt".into(),
-            tier: ModelTier::Fast,
-            context_window: 272_000,
-            max_output_tokens: 10_000,
-            input_cost_per_m: 0.0,
-            output_cost_per_m: 0.0,
-            supports_tools: true,
-            supports_vision: true,
-            supports_streaming: true,
-            aliases: vec!["gpt5-codex-mini".into()],
         },
         // ══════════════════════════════════════════════════════════════
         // Qwen / Alibaba (6)
@@ -2854,11 +2826,23 @@ mod tests {
     fn test_chatgpt_models_subscription_pricing() {
         let catalog = ModelCatalog::new();
         let chatgpt = catalog.models_by_provider("chatgpt");
-        assert!(chatgpt.len() >= 3);
+        assert_eq!(chatgpt.len(), 5);
         assert!(chatgpt.iter().any(|m| m.id == "gpt-5.3-codex"));
+        assert!(chatgpt.iter().any(|m| m.id == "gpt-5.2-codex"));
+        assert!(chatgpt.iter().any(|m| m.id == "gpt-5.1-codex-max"));
+        assert!(chatgpt.iter().any(|m| m.id == "gpt-5.2"));
+        assert!(chatgpt.iter().any(|m| m.id == "gpt-5.1-codex-mini"));
         assert!(chatgpt
             .iter()
             .all(|m| m.input_cost_per_m == 0.0 && m.output_cost_per_m == 0.0));
+        assert_eq!(
+            catalog.find_model("gpt-5.1-codex-max").map(|m| m.tier),
+            Some(ModelTier::Smart)
+        );
+        assert_eq!(
+            catalog.find_model("gpt-5.2").map(|m| m.tier),
+            Some(ModelTier::Frontier)
+        );
     }
 
     #[test]
