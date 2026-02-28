@@ -644,10 +644,27 @@ fn map_provider(openclaw_provider: &str) -> String {
         "together" => "together".to_string(),
         "mistral" => "mistral".to_string(),
         "fireworks" => "fireworks".to_string(),
+        // Gemini aliases
         "google" | "gemini" => "google".to_string(),
+        // Chinese provider aliases (including common OpenClaw custom IDs)
+        "qwen" | "dashscope" | "qwencode" => "qwen".to_string(),
+        "moonshot" | "kimi" | "kimicode" => "moonshot".to_string(),
+        "minimax" => "minimax".to_string(),
+        "zhipu" | "glm" => "zhipu".to_string(),
+        "zhipu_coding" | "codegeex" => "zhipu_coding".to_string(),
+        "qianfan" | "baidu" => "qianfan".to_string(),
         "xai" | "grok" => "xai".to_string(),
         "cerebras" => "cerebras".to_string(),
         "sambanova" => "sambanova".to_string(),
+        // Additional OpenFang-supported providers and aliases
+        "perplexity" => "perplexity".to_string(),
+        "cohere" => "cohere".to_string(),
+        "ai21" => "ai21".to_string(),
+        "huggingface" => "huggingface".to_string(),
+        "replicate" => "replicate".to_string(),
+        "github-copilot" | "copilot" => "github-copilot".to_string(),
+        "vllm" => "vllm".to_string(),
+        "lmstudio" => "lmstudio".to_string(),
         other => other.to_string(),
     }
 }
@@ -664,10 +681,23 @@ fn default_api_key_env(provider: &str) -> String {
         "mistral" => "MISTRAL_API_KEY".to_string(),
         "fireworks" => "FIREWORKS_API_KEY".to_string(),
         "google" => "GOOGLE_API_KEY".to_string(),
+        "qwen" => "DASHSCOPE_API_KEY".to_string(),
+        "moonshot" => "MOONSHOT_API_KEY".to_string(),
+        "minimax" => "MINIMAX_API_KEY".to_string(),
+        "zhipu" | "zhipu_coding" => "ZHIPU_API_KEY".to_string(),
+        "qianfan" => "QIANFAN_API_KEY".to_string(),
         "xai" => "XAI_API_KEY".to_string(),
         "cerebras" => "CEREBRAS_API_KEY".to_string(),
         "sambanova" => "SAMBANOVA_API_KEY".to_string(),
-        "ollama" => String::new(), // Ollama doesn't need an API key
+        "perplexity" => "PERPLEXITY_API_KEY".to_string(),
+        "cohere" => "COHERE_API_KEY".to_string(),
+        "ai21" => "AI21_API_KEY".to_string(),
+        "huggingface" => "HF_API_KEY".to_string(),
+        "replicate" => "REPLICATE_API_TOKEN".to_string(),
+        "github-copilot" => "GITHUB_TOKEN".to_string(),
+        "ollama" => String::new(),   // Ollama doesn't need an API key
+        "vllm" => String::new(),     // vLLM is typically local
+        "lmstudio" => String::new(), // LM Studio is typically local
         _ => format!("{}_API_KEY", provider.to_uppercase()),
     }
 }
@@ -3922,6 +3952,37 @@ mod tests {
         assert_eq!(map_provider("gemini"), "google");
         assert_eq!(map_provider("xai"), "xai");
         assert_eq!(map_provider("grok"), "xai");
+        assert_eq!(map_provider("qwen"), "qwen");
+        assert_eq!(map_provider("dashscope"), "qwen");
+        assert_eq!(map_provider("qwencode"), "qwen");
+        assert_eq!(map_provider("moonshot"), "moonshot");
+        assert_eq!(map_provider("kimi"), "moonshot");
+        assert_eq!(map_provider("kimicode"), "moonshot");
+        assert_eq!(map_provider("zhipu"), "zhipu");
+        assert_eq!(map_provider("glm"), "zhipu");
+        assert_eq!(map_provider("codegeex"), "zhipu_coding");
+        assert_eq!(map_provider("baidu"), "qianfan");
+        assert_eq!(map_provider("copilot"), "github-copilot");
+        assert_eq!(map_provider("github-copilot"), "github-copilot");
+    }
+
+    #[test]
+    fn test_default_api_key_env_mapping() {
+        assert_eq!(default_api_key_env("qwen"), "DASHSCOPE_API_KEY");
+        assert_eq!(default_api_key_env("moonshot"), "MOONSHOT_API_KEY");
+        assert_eq!(default_api_key_env("minimax"), "MINIMAX_API_KEY");
+        assert_eq!(default_api_key_env("zhipu"), "ZHIPU_API_KEY");
+        assert_eq!(default_api_key_env("zhipu_coding"), "ZHIPU_API_KEY");
+        assert_eq!(default_api_key_env("qianfan"), "QIANFAN_API_KEY");
+        assert_eq!(default_api_key_env("perplexity"), "PERPLEXITY_API_KEY");
+        assert_eq!(default_api_key_env("cohere"), "COHERE_API_KEY");
+        assert_eq!(default_api_key_env("ai21"), "AI21_API_KEY");
+        assert_eq!(default_api_key_env("huggingface"), "HF_API_KEY");
+        assert_eq!(default_api_key_env("replicate"), "REPLICATE_API_TOKEN");
+        assert_eq!(default_api_key_env("github-copilot"), "GITHUB_TOKEN");
+        assert!(default_api_key_env("ollama").is_empty());
+        assert!(default_api_key_env("vllm").is_empty());
+        assert!(default_api_key_env("lmstudio").is_empty());
     }
 
     #[test]
