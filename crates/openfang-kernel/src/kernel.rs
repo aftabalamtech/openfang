@@ -413,11 +413,11 @@ fn append_daily_memory_log(workspace: &Path, response: &str) {
             return;
         }
     }
-    // Truncate long responses for the log
-    let summary = if trimmed.len() > 500 {
-        &trimmed[..500]
+    // Truncate long responses for the log (use char index, not byte index, to avoid UTF-8 boundary issues)
+    let summary: String = if trimmed.len() > 500 {
+        trimmed.chars().take(500).collect()
     } else {
-        trimmed
+        trimmed.to_string()
     };
     let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
     if let Ok(mut f) = std::fs::OpenOptions::new()
