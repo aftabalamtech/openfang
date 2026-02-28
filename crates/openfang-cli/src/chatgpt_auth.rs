@@ -98,6 +98,12 @@ pub fn extract_chatgpt_account_id_from_jwt(jwt: &str) -> Option<String> {
     value
         .get("chatgpt_account_id")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            value
+                .get("https://api.openai.com/auth")
+                .and_then(|v| v.get("chatgpt_account_id"))
+                .and_then(|v| v.as_str())
+        })
         .map(|s| s.to_string())
 }
 
@@ -117,4 +123,22 @@ fn decode_base64url(input: &str) -> Option<Vec<u8>> {
         s.push('=');
     }
     base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_nested_chatgpt_account_from_jwt() {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"alg":"none","typ":"JWT"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acc_nested_123"}}"#);
+        let token = format!("{header}.{payload}.sig");
+        assert_eq!(
+            extract_chatgpt_account_id_from_jwt(&token),
+            Some("acc_nested_123".to_string())
+        );
+    }
 }

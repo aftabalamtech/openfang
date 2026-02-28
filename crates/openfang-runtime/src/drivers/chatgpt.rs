@@ -15,6 +15,7 @@ use tracing::{debug, warn};
 
 const CHATGPT_REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
 const CHATGPT_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const DEFAULT_CHATGPT_INSTRUCTIONS: &str = "You are a helpful assistant.";
 
 #[derive(Clone, Default)]
 struct AuthState {
@@ -36,6 +37,7 @@ impl ChatGptDriver {
         account_id: Option<String>,
         base_url: String,
     ) -> Self {
+        let account_id = account_id.or_else(|| extract_chatgpt_account_id_from_jwt(&access_token));
         Self {
             client: reqwest::Client::new(),
             base_url,
@@ -174,35 +176,128 @@ impl LlmDriver for ChatGptDriver {
                 return Err(LlmError::Api { status, message });
             }
 
-            let value: Value = resp
-                .json()
-                .await
-                .map_err(|e| LlmError::Parse(e.to_string()))?;
-            return parse_responses_completion(value);
+            return parse_chatgpt_response(resp).await;
         }
     }
 }
 
-fn build_responses_request(request: &CompletionRequest) -> Value {
-    let mut input: Vec<Value> = Vec::new();
+async fn parse_chatgpt_response(resp: reqwest::Response) -> Result<CompletionResponse, LlmError> {
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| LlmError::Parse(e.to_string()))?;
 
-    if let Some(system) = request.system.as_deref() {
-        let system = system.trim();
-        if !system.is_empty() {
-            input.push(message_input("system", system));
+    if body.trim().is_empty() {
+        return Err(LlmError::Parse("Empty ChatGPT response body".to_string()));
+    }
+
+    // First try canonical JSON body.
+    if let Ok(value) = serde_json::from_str::<Value>(&body) {
+        return parse_responses_completion(value);
+    }
+
+    // Fallback to SSE/JSONL event stream body.
+    if let Ok(parsed) = parse_responses_stream_text(&body) {
+        return Ok(parsed);
+    }
+
+    let preview: String = body.chars().take(240).collect();
+    Err(LlmError::Parse(format!(
+        "Unable to parse ChatGPT response (content-type: {content_type}): {preview}"
+    )))
+}
+
+fn parse_responses_stream_text(body: &str) -> Result<CompletionResponse, LlmError> {
+    let mut event_name = String::new();
+    let mut text_content = String::new();
+    let mut usage = TokenUsage::default();
+    let mut completed_response: Option<Value> = None;
+    for raw_line in body.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(ev) = line.strip_prefix("event: ") {
+            event_name = ev.to_string();
+            continue;
+        }
+
+        // SSE line (`data: {...}`) or newline-delimited JSON (`{...}`).
+        let data = line.strip_prefix("data: ").unwrap_or(line);
+        if data == "[DONE]" {
+            continue;
+        }
+
+        let json: Value = match serde_json::from_str(data) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let event_type = json
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or(event_name.as_str());
+
+        if let Some(u) = json.get("usage") {
+            usage = parse_usage(u);
+        }
+
+        match event_type {
+            "response.output_text.delta" => {
+                if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                    text_content.push_str(delta);
+                }
+            }
+            "response.output_text.done" => {
+                if let Some(text) = json.get("text").and_then(|v| v.as_str()) {
+                    text_content.push_str(text);
+                }
+            }
+            "response.completed" => {
+                if let Some(response) = json.get("response") {
+                    if let Some(u) = response.get("usage") {
+                        usage = parse_usage(u);
+                    }
+                    completed_response = Some(response.clone());
+                }
+            }
+            _ => {}
         }
     }
 
+    if let Some(value) = completed_response {
+        return parse_responses_completion(value);
+    }
+
+    if text_content.is_empty() {
+        return Err(LlmError::Parse(
+            "Response stream did not contain parsable completion events".to_string(),
+        ));
+    }
+
+    let mut content = Vec::new();
+    content.push(ContentBlock::Text { text: text_content });
+    Ok(CompletionResponse {
+        content,
+        stop_reason: StopReason::EndTurn,
+        tool_calls: Vec::new(),
+        usage,
+    })
+}
+
+fn build_responses_request(request: &CompletionRequest) -> Value {
+    let instructions = resolve_instructions(request);
+    let mut input: Vec<Value> = Vec::new();
+
     for msg in &request.messages {
         match (&msg.role, &msg.content) {
-            (Role::System, MessageContent::Text(text)) => {
-                if request.system.is_none() {
-                    let text = text.trim();
-                    if !text.is_empty() {
-                        input.push(message_input("system", text));
-                    }
-                }
-            }
+            (Role::System, _) => {}
             (Role::User, MessageContent::Text(text)) => {
                 let text = text.trim();
                 if !text.is_empty() {
@@ -262,7 +357,6 @@ fn build_responses_request(request: &CompletionRequest) -> Value {
                     input.push(message_input("assistant", assistant_text.trim()));
                 }
             }
-            _ => {}
         }
     }
 
@@ -281,10 +375,10 @@ fn build_responses_request(request: &CompletionRequest) -> Value {
 
     let mut body = serde_json::json!({
         "model": request.model,
+        "instructions": instructions,
         "input": input,
-        "temperature": request.temperature,
-        "max_output_tokens": request.max_tokens,
-        "stream": false,
+        "store": false,
+        "stream": true,
     });
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools);
@@ -293,13 +387,44 @@ fn build_responses_request(request: &CompletionRequest) -> Value {
     body
 }
 
+fn resolve_instructions(request: &CompletionRequest) -> String {
+    if let Some(system) = request.system.as_deref() {
+        let system = system.trim();
+        if !system.is_empty() {
+            return system.to_string();
+        }
+    }
+
+    let from_messages = request
+        .messages
+        .iter()
+        .filter_map(|msg| match (&msg.role, &msg.content) {
+            (Role::System, MessageContent::Text(text)) => {
+                let text = text.trim();
+                if text.is_empty() { None } else { Some(text) }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !from_messages.is_empty() {
+        return from_messages.join("\n\n");
+    }
+
+    DEFAULT_CHATGPT_INSTRUCTIONS.to_string()
+}
+
 fn message_input(role: &str, text: &str) -> Value {
+    let text_type = if role == "assistant" {
+        "output_text"
+    } else {
+        "input_text"
+    };
     serde_json::json!({
         "type": "message",
         "role": role,
         "content": [
             {
-                "type": "input_text",
+                "type": text_type,
                 "text": text,
             }
         ]
@@ -431,6 +556,12 @@ fn extract_chatgpt_account_id_from_jwt(jwt: &str) -> Option<String> {
     claims
         .get("chatgpt_account_id")
         .and_then(|v| v.as_str())
+        .or_else(|| {
+            claims
+                .get("https://api.openai.com/auth")
+                .and_then(|v| v.get("chatgpt_account_id"))
+                .and_then(|v| v.as_str())
+        })
         .map(|s| s.to_string())
 }
 
@@ -445,6 +576,7 @@ fn decode_base64url(input: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openfang_types::message::Message;
 
     #[test]
     fn extracts_chatgpt_account_from_jwt() {
@@ -484,5 +616,101 @@ mod tests {
         assert_eq!(parsed.usage.output_tokens, 34);
         assert_eq!(parsed.tool_calls.len(), 1);
         assert!(matches!(parsed.stop_reason, StopReason::ToolUse));
+    }
+
+    #[test]
+    fn extracts_nested_chatgpt_account_from_jwt() {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"alg":"none","typ":"JWT"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acc_nested_123"}}"#);
+        let token = format!("{header}.{payload}.sig");
+        assert_eq!(
+            extract_chatgpt_account_id_from_jwt(&token),
+            Some("acc_nested_123".to_string())
+        );
+    }
+
+    #[test]
+    fn build_request_sets_instructions_from_request_system() {
+        let request = CompletionRequest {
+            model: "gpt-5.3-codex".to_string(),
+            messages: vec![Message::system("legacy"), Message::user("hello")],
+            tools: vec![],
+            max_tokens: 256,
+            temperature: 0.1,
+            system: Some("primary system".to_string()),
+            thinking: None,
+        };
+
+        let body = build_responses_request(&request);
+        assert_eq!(body["instructions"], "primary system");
+        assert_eq!(body["store"], false);
+        assert_eq!(body["stream"], true);
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("temperature").is_none());
+        let input = body["input"].as_array().expect("input array");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+    }
+
+    #[test]
+    fn build_request_sets_instructions_from_system_messages_when_missing_system_field() {
+        let request = CompletionRequest {
+            model: "gpt-5.3-codex".to_string(),
+            messages: vec![
+                Message::system("sys A"),
+                Message::system("sys B"),
+                Message::user("hello"),
+            ],
+            tools: vec![],
+            max_tokens: 256,
+            temperature: 0.1,
+            system: None,
+            thinking: None,
+        };
+
+        let body = build_responses_request(&request);
+        assert_eq!(body["instructions"], "sys A\n\nsys B");
+        let input = body["input"].as_array().expect("input array");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+    }
+
+    #[test]
+    fn build_request_uses_default_instructions_when_none_provided() {
+        let request = CompletionRequest {
+            model: "gpt-5.3-codex".to_string(),
+            messages: vec![Message::user("hello")],
+            tools: vec![],
+            max_tokens: 256,
+            temperature: 0.1,
+            system: None,
+            thinking: None,
+        };
+
+        let body = build_responses_request(&request);
+        assert_eq!(body["instructions"], DEFAULT_CHATGPT_INSTRUCTIONS);
+    }
+
+    #[test]
+    fn build_request_encodes_assistant_history_as_output_text() {
+        let request = CompletionRequest {
+            model: "gpt-5.3-codex".to_string(),
+            messages: vec![Message::assistant("prior"), Message::user("next")],
+            tools: vec![],
+            max_tokens: 256,
+            temperature: 0.1,
+            system: Some("sys".to_string()),
+            thinking: None,
+        };
+
+        let body = build_responses_request(&request);
+        let input = body["input"].as_array().expect("input array");
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["role"], "assistant");
+        assert_eq!(input[0]["content"][0]["type"], "output_text");
+        assert_eq!(input[1]["role"], "user");
+        assert_eq!(input[1]["content"][0]["type"], "input_text");
     }
 }
