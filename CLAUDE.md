@@ -121,3 +121,4 @@ taskkill //PID <pid> //F
 - `AgentLoopResult` field is `.response` not `.response_text`
 - CLI command to start daemon is `start` not `daemon`
 - On Windows: use `taskkill //PID <pid> //F` (double slashes in MSYS2/Git Bash)
+hello
