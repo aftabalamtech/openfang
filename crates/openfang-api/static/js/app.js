@@ -87,6 +87,17 @@ function toolIcon(toolName) {
 
 // Alpine.js global store
 document.addEventListener('alpine:init', function() {
+  // Check for ?token= query parameter (enables remote browser access via URL)
+  var urlParams = new URLSearchParams(window.location.search);
+  var urlToken = urlParams.get('token');
+  if (urlToken) {
+    OpenFangAPI.setAuthToken(urlToken);
+    localStorage.setItem('openfang-api-key', urlToken);
+    // Strip token from URL to avoid leaking in bookmarks/history
+    var cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, '', cleanUrl);
+  }
+
   // Restore saved API key on load
   var savedKey = localStorage.getItem('openfang-api-key');
   if (savedKey) OpenFangAPI.setAuthToken(savedKey);
