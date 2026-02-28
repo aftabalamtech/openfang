@@ -27,12 +27,23 @@ pub struct GeminiDriver {
 }
 
 impl GeminiDriver {
-    /// Create a new Gemini driver.
+    /// Create a new Gemini driver with a default HTTP client.
     pub fn new(api_key: String, base_url: String) -> Self {
         Self {
             api_key: Zeroizing::new(api_key),
             base_url,
             client: reqwest::Client::new(),
+        }
+    }
+
+    /// Create a new Gemini driver with a custom pre-configured HTTP client.
+    ///
+    /// Use this to inject a proxy-aware client built by [`crate::http_client::build_llm_client`].
+    pub fn with_client(api_key: String, base_url: String, client: reqwest::Client) -> Self {
+        Self {
+            api_key: Zeroizing::new(api_key),
+            base_url,
+            client,
         }
     }
 }

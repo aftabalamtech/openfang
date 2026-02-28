@@ -919,6 +919,123 @@ impl Default for ThinkingConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Proxy configuration — per-component HTTP proxy settings
+// ---------------------------------------------------------------------------
+
+/// HTTP proxy configuration for a specific component category.
+///
+/// Each component (LLM drivers, Skills marketplace, Tools) can independently
+/// choose to use the global proxy or bypass it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ComponentProxyConfig {
+    /// Override: use proxy for this component (`true`), bypass (`false`),
+    /// or follow the global `proxy.enabled` setting (`None` = inherit).
+    pub enabled: Option<bool>,
+    /// Override the proxy URL for this component.
+    /// If `None`, falls back to the global `proxy.url`.
+    pub url: Option<String>,
+}
+
+impl Default for ComponentProxyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: None, // inherit from global
+            url: None,     // inherit from global
+        }
+    }
+}
+
+impl ComponentProxyConfig {
+    /// Resolve whether this component should use a proxy, given the global config.
+    pub fn is_enabled(&self, global: &ProxyConfig) -> bool {
+        self.enabled.unwrap_or(global.enabled)
+    }
+
+    /// Resolve the proxy URL for this component, falling back to the global URL.
+    pub fn resolved_url<'a>(&'a self, global: &'a ProxyConfig) -> Option<&'a str> {
+        self.url
+            .as_deref()
+            .or(global.url.as_deref())
+    }
+}
+
+/// Global HTTP proxy configuration.
+///
+/// Configure in `config.toml`:
+/// ```toml
+/// [proxy]
+/// enabled = true
+/// url = "http://127.0.0.1:7890"
+///
+/// # Optional: per-component overrides
+/// [proxy.llm]         # LLM API calls (Anthropic, OpenAI, Gemini, ...)
+/// enabled = true
+///
+/// [proxy.skills]      # ClawHub marketplace downloads
+/// enabled = false     # bypass proxy for skill downloads
+///
+/// [proxy.tools]       # web_fetch, web_search, MCP connections
+/// enabled = true
+/// url = "http://127.0.0.1:7891"  # use a different proxy for tools
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProxyConfig {
+    /// Enable proxy globally. Default: `false`.
+    pub enabled: bool,
+    /// Proxy URL (e.g. `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`).
+    /// HTTPS proxies (`https://...`) are also supported.
+    /// Required when `enabled = true` unless overridden per component.
+    pub url: Option<String>,
+    /// Optional username for proxy authentication.
+    pub username: Option<String>,
+    /// Optional password for proxy authentication (use env var reference preferred).
+    pub password: Option<String>,
+    /// Environment variable holding the proxy password (preferred over inline `password`).
+    pub password_env: Option<String>,
+    /// Comma-separated list of hostnames/IP ranges that bypass the proxy.
+    /// e.g. `"localhost,127.0.0.1,192.168.0.0/16"`
+    #[serde(default)]
+    pub no_proxy: Vec<String>,
+    /// Per-component proxy settings for LLM API calls.
+    #[serde(default)]
+    pub llm: ComponentProxyConfig,
+    /// Per-component proxy settings for Skill marketplace (ClawHub) downloads.
+    #[serde(default)]
+    pub skills: ComponentProxyConfig,
+    /// Per-component proxy settings for built-in tools (web_fetch, web_search, MCP).
+    #[serde(default)]
+    pub tools: ComponentProxyConfig,
+}
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: None,
+            username: None,
+            password: None,
+            password_env: None,
+            no_proxy: Vec::new(),
+            llm: ComponentProxyConfig::default(),
+            skills: ComponentProxyConfig::default(),
+            tools: ComponentProxyConfig::default(),
+        }
+    }
+}
+
+impl ProxyConfig {
+    /// Resolve the proxy password (checks `password_env` first, then `password`).
+    pub fn resolved_password(&self) -> Option<String> {
+        self.password_env
+            .as_deref()
+            .and_then(|env| std::env::var(env).ok())
+            .or_else(|| self.password.clone())
+    }
+}
+
 /// Top-level kernel configuration.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1046,6 +1163,10 @@ pub struct KernelConfig {
     /// OAuth client ID overrides for PKCE flows.
     #[serde(default)]
     pub oauth: OAuthConfig,
+    /// HTTP proxy configuration for outbound network requests.
+    /// Controls whether LLM API calls, Skill downloads, and Tools use a proxy.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
 }
 
 /// OAuth client ID overrides for PKCE flows.
@@ -1213,6 +1334,7 @@ impl Default for KernelConfig {
             budget: BudgetConfig::default(),
             provider_urls: HashMap::new(),
             oauth: OAuthConfig::default(),
+            proxy: ProxyConfig::default(),
         }
     }
 }
@@ -1305,6 +1427,14 @@ impl std::fmt::Debug for KernelConfig {
                 &format!("{} provider(s)", self.auth_profiles.len()),
             )
             .field("thinking", &self.thinking.is_some())
+            .field(
+                "proxy",
+                &format!(
+                    "enabled={} url={}",
+                    self.proxy.enabled,
+                    self.proxy.url.as_deref().unwrap_or("<none>")
+                ),
+            )
             .finish()
     }
 }

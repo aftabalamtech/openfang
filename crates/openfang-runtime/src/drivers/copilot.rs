@@ -75,16 +75,19 @@ impl Default for CopilotTokenCache {
 /// Authorization: Bearer {github_token}
 ///
 /// Response: {"token": "tid=...;exp=...;sku=...;proxy-ep=...", "expires_at": unix_timestamp}
-pub async fn exchange_copilot_token(github_token: &str) -> Result<CachedToken, String> {
-    let client = reqwest::Client::builder()
-        .timeout(TOKEN_EXCHANGE_TIMEOUT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
-
+///
+/// # Arguments
+/// * `github_token` — GitHub personal access token
+/// * `client` — pre-configured HTTP client (should carry proxy settings)
+pub async fn exchange_copilot_token(
+    github_token: &str,
+    client: &reqwest::Client,
+) -> Result<CachedToken, String> {
     debug!("Exchanging GitHub token for Copilot API token");
 
     let resp = client
         .get(COPILOT_TOKEN_URL)
+        .timeout(TOKEN_EXCHANGE_TIMEOUT) // Override client-level timeout; token exchange should be fast
         .header("Authorization", format!("token {github_token}"))
         .header("Accept", "application/json")
         .header("User-Agent", "OpenFang/1.0")
@@ -166,6 +169,8 @@ pub fn copilot_auth_available() -> bool {
 pub struct CopilotDriver {
     github_token: Zeroizing<String>,
     token_cache: CopilotTokenCache,
+    /// Optional pre-configured HTTP client (e.g. with proxy settings).
+    http_client: Option<reqwest::Client>,
 }
 
 impl CopilotDriver {
@@ -173,6 +178,22 @@ impl CopilotDriver {
         Self {
             github_token: Zeroizing::new(github_token),
             token_cache: CopilotTokenCache::new(),
+            http_client: None,
+        }
+    }
+
+    /// Create a CopilotDriver with a custom pre-configured HTTP client.
+    ///
+    /// Use this to inject a proxy-aware client built by [`crate::http_client::build_llm_client`].
+    pub fn with_client(
+        github_token: String,
+        _base_url: String,
+        client: reqwest::Client,
+    ) -> Self {
+        Self {
+            github_token: Zeroizing::new(github_token),
+            token_cache: CopilotTokenCache::new(),
+            http_client: Some(client),
         }
     }
 
@@ -183,9 +204,20 @@ impl CopilotDriver {
             return Ok(cached);
         }
 
+        // Build or reuse the HTTP client for token exchange.
+        // Crucially: use the same proxy-aware client so token refresh also goes through proxy.
+        let exchange_client = if let Some(ref c) = self.http_client {
+            c.clone()
+        } else {
+            reqwest::Client::builder()
+                .timeout(TOKEN_EXCHANGE_TIMEOUT)
+                .build()
+                .unwrap_or_default()
+        };
+
         // Exchange GitHub PAT for Copilot token
         debug!("Copilot token expired or missing, exchanging...");
-        let token = exchange_copilot_token(&self.github_token)
+        let token = exchange_copilot_token(&self.github_token, &exchange_client)
             .await
             .map_err(|e| crate::llm_driver::LlmError::Api {
                 status: 401,
@@ -204,7 +236,15 @@ impl CopilotDriver {
         } else {
             token.base_url.clone()
         };
-        super::openai::OpenAIDriver::new(token.token.to_string(), base_url)
+        if let Some(ref client) = self.http_client {
+            super::openai::OpenAIDriver::with_client(
+                token.token.to_string(),
+                base_url,
+                client.clone(),
+            )
+        } else {
+            super::openai::OpenAIDriver::new(token.token.to_string(), base_url)
+        }
     }
 }
 

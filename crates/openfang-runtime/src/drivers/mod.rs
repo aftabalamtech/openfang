@@ -10,7 +10,9 @@ pub mod fallback;
 pub mod gemini;
 pub mod openai;
 
+use crate::http_client::build_llm_client;
 use crate::llm_driver::{DriverConfig, LlmDriver, LlmError};
+use openfang_types::config::ProxyConfig;
 use openfang_types::model_catalog::{
     AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, COHERE_BASE_URL, DEEPSEEK_BASE_URL,
     FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL, LMSTUDIO_BASE_URL,
@@ -190,7 +192,20 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
 /// - `replicate` — Replicate
 /// - Any custom provider with `base_url` set uses OpenAI-compatible format
 pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmError> {
+    create_driver_with_proxy(config, &ProxyConfig::default())
+}
+
+/// Create an LLM driver with proxy support.
+///
+/// Same as [`create_driver`] but applies the given `proxy_config` to all
+/// outbound LLM API HTTP requests.
+pub fn create_driver_with_proxy(
+    config: &DriverConfig,
+    proxy_config: &ProxyConfig,
+) -> Result<Arc<dyn LlmDriver>, LlmError> {
     let provider = config.provider.as_str();
+    // Build a proxy-aware HTTP client for this LLM request
+    let http_client = build_llm_client(proxy_config);
 
     // Anthropic uses a different API format — special case
     if provider == "anthropic" {
@@ -205,7 +220,9 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .base_url
             .clone()
             .unwrap_or_else(|| ANTHROPIC_BASE_URL.to_string());
-        return Ok(Arc::new(anthropic::AnthropicDriver::new(api_key, base_url)));
+        return Ok(Arc::new(anthropic::AnthropicDriver::with_client(
+            api_key, base_url, http_client,
+        )));
     }
 
     // Gemini uses a different API format — special case
@@ -224,7 +241,9 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .base_url
             .clone()
             .unwrap_or_else(|| GEMINI_BASE_URL.to_string());
-        return Ok(Arc::new(gemini::GeminiDriver::new(api_key, base_url)));
+        return Ok(Arc::new(gemini::GeminiDriver::with_client(
+            api_key, base_url, http_client,
+        )));
     }
 
     // GitHub Copilot — wraps OpenAI-compatible driver with automatic token exchange.
@@ -244,9 +263,10 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .base_url
             .clone()
             .unwrap_or_else(|| copilot::GITHUB_COPILOT_BASE_URL.to_string());
-        return Ok(Arc::new(copilot::CopilotDriver::new(
+        return Ok(Arc::new(copilot::CopilotDriver::with_client(
             github_token,
             base_url,
+            http_client,
         )));
     }
 
@@ -270,15 +290,18 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .clone()
             .unwrap_or_else(|| defaults.base_url.to_string());
 
-        return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url)));
+        return Ok(Arc::new(openai::OpenAIDriver::with_client(
+            api_key, base_url, http_client.clone(),
+        )));
     }
 
     // Unknown provider — if base_url is set, treat as custom OpenAI-compatible
     if let Some(ref base_url) = config.base_url {
         let api_key = config.api_key.clone().unwrap_or_default();
-        return Ok(Arc::new(openai::OpenAIDriver::new(
+        return Ok(Arc::new(openai::OpenAIDriver::with_client(
             api_key,
             base_url.clone(),
+            http_client,
         )));
     }
 

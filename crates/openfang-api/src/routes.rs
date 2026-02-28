@@ -2782,7 +2782,7 @@ pub async fn clawhub_search(
         .unwrap_or(20);
 
     let cache_dir = state.kernel.config.home_dir.join(".cache").join("clawhub");
-    let client = openfang_skills::clawhub::ClawHubClient::new(cache_dir);
+    let client = openfang_skills::clawhub::ClawHubClient::with_proxy(cache_dir, &state.kernel.config.proxy);
 
     match client.search(&query, limit).await {
         Ok(results) => {
@@ -2846,7 +2846,7 @@ pub async fn clawhub_browse(
     let cursor = params.get("cursor").map(|s| s.as_str());
 
     let cache_dir = state.kernel.config.home_dir.join(".cache").join("clawhub");
-    let client = openfang_skills::clawhub::ClawHubClient::new(cache_dir);
+    let client = openfang_skills::clawhub::ClawHubClient::with_proxy(cache_dir, &state.kernel.config.proxy);
 
     match client.browse(sort, limit, cursor).await {
         Ok(results) => {
@@ -2881,7 +2881,7 @@ pub async fn clawhub_skill_detail(
     Path(slug): Path<String>,
 ) -> impl IntoResponse {
     let cache_dir = state.kernel.config.home_dir.join(".cache").join("clawhub");
-    let client = openfang_skills::clawhub::ClawHubClient::new(cache_dir);
+    let client = openfang_skills::clawhub::ClawHubClient::with_proxy(cache_dir, &state.kernel.config.proxy);
 
     let skills_dir = state.kernel.config.home_dir.join("skills");
     let is_installed = client.is_installed(&slug, &skills_dir);
@@ -2945,7 +2945,7 @@ pub async fn clawhub_install(
 ) -> impl IntoResponse {
     let skills_dir = state.kernel.config.home_dir.join("skills");
     let cache_dir = state.kernel.config.home_dir.join(".cache").join("clawhub");
-    let client = openfang_skills::clawhub::ClawHubClient::new(cache_dir);
+    let client = openfang_skills::clawhub::ClawHubClient::with_proxy(cache_dir, &state.kernel.config.proxy);
 
     // Check if already installed
     if client.is_installed(&req.slug, &skills_dir) {

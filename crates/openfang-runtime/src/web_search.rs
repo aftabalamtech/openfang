@@ -7,9 +7,10 @@
 //! All API keys use `Zeroizing<String>` via `resolve_api_key()` to auto-wipe
 //! secrets from memory on drop.
 
+use crate::http_client::build_tools_client;
 use crate::web_cache::WebCache;
 use crate::web_content::wrap_external_content;
-use openfang_types::config::{SearchProvider, WebConfig};
+use openfang_types::config::{ProxyConfig, SearchProvider, WebConfig};
 use std::sync::Arc;
 use tracing::{debug, warn};
 use zeroize::Zeroizing;
@@ -34,6 +35,20 @@ impl WebSearchEngine {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_default();
+        Self {
+            config,
+            client,
+            cache,
+        }
+    }
+
+    /// Create a search engine with proxy support.
+    pub fn with_proxy(
+        config: WebConfig,
+        cache: Arc<WebCache>,
+        proxy_config: &ProxyConfig,
+    ) -> Self {
+        let client = build_tools_client(proxy_config, 15);
         Self {
             config,
             client,

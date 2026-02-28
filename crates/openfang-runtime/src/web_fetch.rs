@@ -4,9 +4,10 @@
 //! Pipeline: SSRF check → cache lookup → HTTP GET → detect HTML →
 //! html_to_markdown() → truncate → wrap_external_content() → cache → return
 
+use crate::http_client::build_tools_client;
 use crate::web_cache::WebCache;
 use crate::web_content::{html_to_markdown, wrap_external_content};
-use openfang_types::config::WebFetchConfig;
+use openfang_types::config::{ProxyConfig, WebFetchConfig};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::Arc;
 use tracing::debug;
@@ -25,6 +26,20 @@ impl WebFetchEngine {
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
             .build()
             .unwrap_or_default();
+        Self {
+            config,
+            client,
+            cache,
+        }
+    }
+
+    /// Create a fetch engine with proxy support.
+    pub fn with_proxy(
+        config: WebFetchConfig,
+        cache: Arc<WebCache>,
+        proxy_config: &ProxyConfig,
+    ) -> Self {
+        let client = build_tools_client(proxy_config, config.timeout_secs);
         Self {
             config,
             client,

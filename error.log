@@ -1,0 +1,16 @@
+    Checking openfang-runtime v0.1.9 (D:\Codings\Ai\openfang\crates\openfang-runtime)
+error[E0308]: mismatched types
+  --> crates\openfang-runtime\src\http_client.rs:84:33
+   |
+84 |                     .or_else(|| proxy_config.url.as_deref().map(str::to_string))
+   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Option<&str>`, found `Option<String>`
+   |
+   = note: expected enum `std::option::Option<&str>`
+              found enum `std::option::Option<std::string::String>`
+help: try using `.as_deref()` to convert `std::option::Option<std::string::String>` to `std::option::Option<&str>`
+   |
+84 |                     .or_else(|| proxy_config.url.as_deref().map(str::to_string).as_deref())
+   |                                                                                +++++++++++
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `openfang-runtime` (lib) due to 1 previous error

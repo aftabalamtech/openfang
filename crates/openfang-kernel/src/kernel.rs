@@ -502,6 +502,16 @@ impl OpenFangKernel {
             }
         }
 
+        // Apply proxy env vars early — before any HTTP clients are created.
+        // Must run on main thread before the Tokio runtime starts.
+        //
+        // apply_no_proxy_env   → sets NO_PROXY for reqwest clients (process-wide)
+        // init_shell_proxy_env → initializes the proxy configuration singleton
+        //   so that shell_exec child processes (curl, wget, etc.) get the configured 
+        //   proxy via direct environment variable injection.
+        openfang_runtime::http_client::apply_no_proxy_env(&config.proxy);
+        openfang_runtime::http_client::init_shell_proxy_env(&config.proxy);
+
         // Validate configuration and log warnings
         let warnings = config.validate();
         for w in &warnings {
@@ -523,13 +533,13 @@ impl OpenFangKernel {
                 .map_err(|e| KernelError::BootFailed(format!("Memory init failed: {e}")))?,
         );
 
-        // Create LLM driver
+        // Create LLM driver (proxy-aware)
         let driver_config = DriverConfig {
             provider: config.default_model.provider.clone(),
             api_key: std::env::var(&config.default_model.api_key_env).ok(),
             base_url: config.default_model.base_url.clone(),
         };
-        let primary_driver = drivers::create_driver(&driver_config)
+        let primary_driver = drivers::create_driver_with_proxy(&driver_config, &config.proxy)
             .map_err(|e| KernelError::BootFailed(format!("LLM driver init failed: {e}")))?;
 
         // If fallback providers are configured, wrap the primary driver in a FallbackDriver
@@ -545,7 +555,7 @@ impl OpenFangKernel {
                     },
                     base_url: fb.base_url.clone(),
                 };
-                match drivers::create_driver(&fb_config) {
+                match drivers::create_driver_with_proxy(&fb_config, &config.proxy) {
                     Ok(d) => {
                         info!(
                             provider = %fb.provider,
@@ -689,16 +699,19 @@ impl OpenFangKernel {
         }
 
         // Initialize web tools (multi-provider search + SSRF-protected fetch + caching)
+        // Use proxy-aware constructors so web_fetch / web_search honor proxy config.
         let cache_ttl = std::time::Duration::from_secs(config.web.cache_ttl_minutes * 60);
         let web_cache = Arc::new(openfang_runtime::web_cache::WebCache::new(cache_ttl));
         let web_ctx = openfang_runtime::web_search::WebToolsContext {
-            search: openfang_runtime::web_search::WebSearchEngine::new(
+            search: openfang_runtime::web_search::WebSearchEngine::with_proxy(
                 config.web.clone(),
                 web_cache.clone(),
+                &config.proxy,
             ),
-            fetch: openfang_runtime::web_fetch::WebFetchEngine::new(
+            fetch: openfang_runtime::web_fetch::WebFetchEngine::with_proxy(
                 config.web.fetch.clone(),
                 web_cache,
+                &config.proxy,
             ),
         };
 
@@ -3514,7 +3527,7 @@ impl OpenFangKernel {
                     .or_else(|| self.config.default_model.base_url.clone()),
             };
 
-            drivers::create_driver(&driver_config).map_err(|e| {
+            drivers::create_driver_with_proxy(&driver_config, &self.config.proxy).map_err(|e| {
                 KernelError::BootFailed(format!("Agent LLM driver init failed: {e}"))
             })?
         };
@@ -3531,7 +3544,7 @@ impl OpenFangKernel {
                         .and_then(|env| std::env::var(env).ok()),
                     base_url: fb.base_url.clone(),
                 };
-                match drivers::create_driver(&config) {
+                match drivers::create_driver_with_proxy(&config, &self.config.proxy) {
                     Ok(d) => chain.push(d),
                     Err(e) => {
                         warn!("Fallback driver '{}' failed to init: {e}", fb.provider);
