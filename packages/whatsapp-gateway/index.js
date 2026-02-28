@@ -10,6 +10,10 @@ const { randomUUID } = require('node:crypto');
 const PORT = parseInt(process.env.WHATSAPP_GATEWAY_PORT || '3009', 10);
 const OPENFANG_URL = (process.env.OPENFANG_URL || 'http://127.0.0.1:4200').replace(/\/+$/, '');
 const DEFAULT_AGENT = process.env.OPENFANG_DEFAULT_AGENT || 'assistant';
+const ALLOWED_NUMBERS = (process.env.WHATSAPP_ALLOWED_USERS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 // ---------------------------------------------------------------------------
 // State
@@ -47,6 +51,8 @@ async function startConnection() {
 
   // In-memory message store for retry handling
   const msgStore = {};
+  const MSG_STORE_MAX = 500;
+  const msgStoreKeys = [];
 
   sock = makeWASocket({
     version,
@@ -121,9 +127,14 @@ async function startConnection() {
     if (type !== 'notify') return;
 
     for (const msg of messages) {
-      // Store message for retry handling
+      // Store message for retry handling (with LRU eviction)
       if (msg.key.id && msg.key.remoteJid) {
-        msgStore[msg.key.remoteJid + ':' + msg.key.id] = msg.message;
+        const storeKey = msg.key.remoteJid + ':' + msg.key.id;
+        msgStore[storeKey] = msg.message;
+        msgStoreKeys.push(storeKey);
+        if (msgStoreKeys.length > MSG_STORE_MAX) {
+          delete msgStore[msgStoreKeys.shift()];
+        }
       }
       // Skip own outgoing messages (prevents echo loop)
       if (msg.key.fromMe) continue;
@@ -131,10 +142,14 @@ async function startConnection() {
       if (msg.key.remoteJid === 'status@broadcast') continue;
       // Skip group messages — only process direct chats (JID ends with @s.whatsapp.net)
       if (msg.key.remoteJid && !msg.key.remoteJid.endsWith('@s.whatsapp.net')) continue;
-      // Allowlist: only process messages from specific numbers
-      const ALLOWED_NUMBERS = ['923168934164'];
-      const senderNum = (msg.key.remoteJid || '').replace(/@.*$/, '');
-      if (!ALLOWED_NUMBERS.includes(senderNum)) continue;
+      // Allowlist: only process messages from approved numbers (empty = allow all)
+      if (ALLOWED_NUMBERS.length > 0) {
+        const senderNum = (msg.key.remoteJid || '').replace(/@.*$/, '');
+        if (!ALLOWED_NUMBERS.includes(senderNum)) {
+          console.log(`[gateway] Blocked message from ${senderNum} (not in allowlist)`);
+          continue;
+        }
+      }
       // Skip protocol/reaction/receipt messages (no useful text)
       if (msg.message?.protocolMessage || msg.message?.reactionMessage) continue;
 
@@ -171,10 +186,12 @@ async function startConnection() {
 // Resolve agent name to UUID (cached)
 // ---------------------------------------------------------------------------
 let resolvedAgentId = null;
+let resolvedAgentAt = 0;
+const AGENT_RESOLVE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function resolveAgentId() {
   return new Promise((resolve, reject) => {
-    if (resolvedAgentId) return resolve(resolvedAgentId);
+    if (resolvedAgentId && (Date.now() - resolvedAgentAt < AGENT_RESOLVE_TTL_MS)) return resolve(resolvedAgentId);
     const url = new URL(`${OPENFANG_URL}/api/agents`);
     const req = http.request(
       { hostname: url.hostname, port: url.port || 4200, path: url.pathname, method: 'GET', timeout: 10000 },
@@ -187,6 +204,7 @@ function resolveAgentId() {
             const match = agents.find(a => a.name === DEFAULT_AGENT || a.id === DEFAULT_AGENT);
             if (match) {
               resolvedAgentId = match.id;
+              resolvedAgentAt = Date.now();
               console.log(`[gateway] Resolved agent "${DEFAULT_AGENT}" → ${resolvedAgentId}`);
               resolve(resolvedAgentId);
             } else {
@@ -317,6 +335,12 @@ const server = http.createServer(async (req, res) => {
           message: 'Already connected to WhatsApp',
           connected: true,
         });
+      }
+
+      // Clean up existing socket to prevent leaked event listeners
+      if (sock) {
+        try { sock.end(); } catch {}
+        sock = null;
       }
 
       // Start a new connection (resets any existing)

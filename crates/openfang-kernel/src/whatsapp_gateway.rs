@@ -162,6 +162,7 @@ pub async fn start_whatsapp_gateway(kernel: &Arc<super::kernel::OpenFangKernel>)
         .as_deref()
         .unwrap_or("assistant")
         .to_string();
+    let allowed_users = wa_config.allowed_users.join(",");
 
     // Auto-set the env var so the rest of the system finds the gateway
     std::env::set_var("WHATSAPP_WEB_GATEWAY_URL", format!("http://127.0.0.1:{port}"));
@@ -185,6 +186,7 @@ pub async fn start_whatsapp_gateway(kernel: &Arc<super::kernel::OpenFangKernel>)
                 .env("WHATSAPP_GATEWAY_PORT", port.to_string())
                 .env("OPENFANG_URL", &openfang_url)
                 .env("OPENFANG_DEFAULT_AGENT", &default_agent)
+                .env("WHATSAPP_ALLOWED_USERS", &allowed_users)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
                 .spawn();
