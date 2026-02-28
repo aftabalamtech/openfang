@@ -1211,7 +1211,7 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec![],
         },
         // ══════════════════════════════════════════════════════════════
-        // OpenRouter (5)
+        // OpenRouter (6)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
             id: "openrouter/auto".into(),
@@ -1250,6 +1250,20 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             max_output_tokens: 16_000,
             input_cost_per_m: 0.20,
             output_cost_per_m: 0.60,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "openrouter/free".into(),
+            display_name: "OpenRouter Free".into(),
+            provider: "openrouter".into(),
+            tier: ModelTier::Fast,
+            context_window: 128_000,
+            max_output_tokens: 16_000,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
             supports_tools: true,
             supports_vision: false,
             supports_streaming: true,
@@ -2726,6 +2740,14 @@ mod tests {
         assert!(catalog.get_provider("huggingface").is_some());
         assert!(catalog.get_provider("xai").is_some());
         assert!(catalog.get_provider("replicate").is_some());
+    }
+
+    #[test]
+    fn test_openrouter_models_include_free() {
+        let catalog = ModelCatalog::new();
+        let openrouter = catalog.models_by_provider("openrouter");
+        assert_eq!(openrouter.len(), 6);
+        assert!(openrouter.iter().any(|m| m.id == "openrouter/free"));
     }
 
     #[test]
