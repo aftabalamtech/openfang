@@ -3935,6 +3935,7 @@ dependencies = [
 name = "openfang-cli"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "clap_complete",
  "colored",

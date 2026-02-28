@@ -15,7 +15,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 // ── Internal state ───────────────────────────────────────────────────────────
@@ -417,14 +417,19 @@ impl StandaloneChat {
         let body = crate::daemon_json(client.get(format!("{base_url}/api/agents")).send());
         let agents = body.as_array();
 
-        // Try to find by name/id
+        // Try to find by name/id. For default chat, only reuse an existing
+        // "assistant" agent; otherwise spawn one from template.
         let found = match agent_name {
             Some(name_or_id) => agents.and_then(|arr| {
                 arr.iter().find(|a| {
                     a["name"].as_str() == Some(name_or_id) || a["id"].as_str() == Some(name_or_id)
                 })
             }),
-            None => agents.and_then(|arr| arr.first()),
+            None => agents.and_then(|arr| {
+                arr.iter()
+                    .find(|a| a["name"].as_str() == Some("assistant"))
+                    .or_else(|| arr.first())
+            }),
         };
 
         if let Some(agent) = found {
@@ -473,10 +478,15 @@ impl StandaloneChat {
 
         // Check for existing agents
         let existing = kernel.registry.list();
-        if let Some(entry) = existing
-            .iter()
-            .find(|e| self.agent_name.is_empty() || e.name == self.agent_name)
-        {
+        let existing_match = if self.agent_name.is_empty() {
+            existing
+                .iter()
+                .find(|e| e.name == "assistant")
+                .or_else(|| existing.first())
+        } else {
+            existing.iter().find(|e| e.name == self.agent_name)
+        };
+        if let Some(entry) = existing_match {
             self.enter_chat_inprocess(entry.id, entry.name.clone());
             return;
         }

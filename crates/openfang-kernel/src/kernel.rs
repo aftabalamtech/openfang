@@ -2242,15 +2242,11 @@ impl OpenFangKernel {
     /// Switch an agent's model.
     pub fn set_agent_model(&self, agent_id: AgentId, model: &str) -> KernelResult<()> {
         // Resolve provider from model catalog so switching models also switches provider
-        let resolved_provider = self
-            .model_catalog
-            .read()
-            .ok()
-            .and_then(|catalog| {
-                catalog
-                    .find_model(model)
-                    .map(|entry| entry.provider.clone())
-            });
+        let resolved_provider = self.model_catalog.read().ok().and_then(|catalog| {
+            catalog
+                .find_model(model)
+                .map(|entry| entry.provider.clone())
+        });
 
         if let Some(provider) = resolved_provider {
             self.registry
@@ -3494,31 +3490,41 @@ impl OpenFangKernel {
             // Create a dedicated driver for this agent
             // Auth profile rotation: if profiles are configured for this provider,
             // select the highest-priority profile's key env var.
+            // Pick the provider-appropriate API key env var.
+            // If the agent was switched to a different provider than the global default,
+            // falling back to `default_model.api_key_env` can select the wrong secret.
+            let provider_default_key_env = self
+                .model_catalog
+                .read()
+                .ok()
+                .and_then(|catalog| catalog.get_provider(agent_provider).cloned())
+                .map(|p| p.api_key_env)
+                .filter(|env| !env.is_empty());
             let default_key_env = manifest
                 .model
                 .api_key_env
-                .as_deref()
-                .unwrap_or(&self.config.default_model.api_key_env);
+                .clone()
+                .or(provider_default_key_env)
+                .unwrap_or_else(|| self.config.default_model.api_key_env.clone());
 
-            let api_key_env =
-                if let Some(profiles) = self.config.auth_profiles.get(agent_provider.as_str()) {
-                    if !profiles.is_empty() {
-                        // Pick highest-priority profile (lowest priority number)
-                        let mut sorted: Vec<_> = profiles.iter().collect();
-                        sorted.sort_by_key(|p| p.priority);
-                        let best = &sorted[0];
-                        // Use the profile's env var if the key exists, otherwise fall back
-                        if std::env::var(&best.api_key_env).is_ok() {
-                            best.api_key_env.clone()
-                        } else {
-                            default_key_env.to_string()
-                        }
+            let api_key_env = if let Some(profiles) = self.config.auth_profiles.get(agent_provider.as_str()) {
+                if !profiles.is_empty() {
+                    // Pick highest-priority profile (lowest priority number)
+                    let mut sorted: Vec<_> = profiles.iter().collect();
+                    sorted.sort_by_key(|p| p.priority);
+                    let best = &sorted[0];
+                    // Use the profile's env var if the key exists, otherwise fall back
+                    if std::env::var(&best.api_key_env).is_ok() {
+                        best.api_key_env.clone()
                     } else {
-                        default_key_env.to_string()
+                        default_key_env.clone()
                     }
                 } else {
-                    default_key_env.to_string()
-                };
+                    default_key_env.clone()
+                }
+            } else {
+                default_key_env.clone()
+            };
 
             let driver_config = DriverConfig {
                 provider: agent_provider.clone(),
@@ -4093,7 +4099,8 @@ impl OpenFangKernel {
                 tool_names.join(", ")
             ));
         }
-        summary.push_str("MCP tools are prefixed with mcp_{server}_ and work like regular tools.\n");
+        summary
+            .push_str("MCP tools are prefixed with mcp_{server}_ and work like regular tools.\n");
         // Add filesystem-specific guidance when a filesystem MCP server is connected
         let has_filesystem = servers.keys().any(|s| s.contains("filesystem"));
         if has_filesystem {
