@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y \
     libgbm1 \
     python3 \
     python3-pip \
+    python-is-python3 \
     yt-dlp \
     # 修正点 1：清理 apt 缓存，去掉末尾多余的斜杠
     && rm -rf /var/lib/apt/lists/*
