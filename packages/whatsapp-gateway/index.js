@@ -99,18 +99,11 @@ async function startConnection() {
         if (fs.existsSync(authPath)) {
           fs.rmSync(authPath, { recursive: true, force: true });
         }
-      } else if (statusCode === DisconnectReason.restartRequired ||
-                 statusCode === DisconnectReason.timedOut) {
-        // Recoverable — reconnect automatically
-        console.log('[gateway] Reconnecting...');
-        statusMessage = 'Reconnecting...';
-        setTimeout(() => startConnection(), 2000);
       } else {
-        // QR expired or other non-recoverable close
-        qrExpired = true;
-        connStatus = 'disconnected';
-        statusMessage = 'QR code expired. Click "Generate New QR" to retry.';
-        qrDataUrl = '';
+        // All other disconnects (restart required, timeout, unknown) — auto-reconnect
+        console.log('[gateway] Reconnecting in 3s...');
+        statusMessage = 'Reconnecting...';
+        setTimeout(() => startConnection(), 3000);
       }
     }
 
