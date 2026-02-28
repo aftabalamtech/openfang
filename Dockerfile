@@ -19,7 +19,7 @@ RUN cargo build --release --bin openfang
 # Stage 2: 最终运行环境 (包含完整的自动化依赖)
 FROM debian:bookworm-slim
 
-# 安装 CA 证书、FFmpeg、中文字体、Python 环境以及 Playwright 浏览器所需的所有底层库
+# 安装 CA 证书、FFmpeg、中文字体、Python 环境、Node.js 环境以及 Playwright 浏览器底层库
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     ffmpeg \
@@ -43,11 +43,12 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python-is-python3 \
+    nodejs \
+    npm \
     yt-dlp \
-    # 修正点 1：清理 apt 缓存，去掉末尾多余的斜杠
     && rm -rf /var/lib/apt/lists/*
 
-# 修正点 2 & 3：独立执行 pip 安装，并添加绕过 Debian 限制的参数
+# 独立执行 pip 安装，并添加绕过 Debian 限制的参数
 RUN pip3 install playwright --break-system-packages \
     && playwright install chromium
 
@@ -55,7 +56,6 @@ RUN pip3 install playwright --break-system-packages \
 COPY --from=builder /build/target/release/openfang /usr/local/bin/
 COPY --from=builder /build/agents /opt/openfang/agents
 
-# 提示：虽然这里写了 EXPOSE 4200，但实际根据我们之前的测试，最新版内核已经改成了 50051
 EXPOSE 4200
 EXPOSE 50051
 
