@@ -439,6 +439,15 @@ enum AgentCommands {
         /// Agent ID (UUID).
         agent_id: String,
     },
+    /// Update mutable agent runtime settings.
+    Set {
+        /// Agent ID (UUID).
+        agent_id: String,
+        /// Field to update (currently only: model).
+        field: String,
+        /// New field value.
+        value: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -803,6 +812,11 @@ fn main() {
             AgentCommands::List { json } => cmd_agent_list(cli.config, json),
             AgentCommands::Chat { agent_id } => cmd_agent_chat(cli.config, &agent_id),
             AgentCommands::Kill { agent_id } => cmd_agent_kill(cli.config, &agent_id),
+            AgentCommands::Set {
+                agent_id,
+                field,
+                value,
+            } => cmd_agent_set(cli.config, &agent_id, &field, &value),
         },
         Some(Commands::Workflow(sub)) => match sub {
             WorkflowCommands::List => cmd_workflow_list(),
@@ -1579,6 +1593,56 @@ fn cmd_agent_kill(config: Option<PathBuf>, agent_id_str: &str) {
                 eprintln!("Failed to kill agent: {e}");
                 std::process::exit(1);
             }
+        }
+    }
+}
+
+fn cmd_agent_set(config: Option<PathBuf>, agent_id_str: &str, field: &str, value: &str) {
+    match field {
+        "model" => cmd_agent_set_model(config, agent_id_str, value),
+        _ => {
+            eprintln!("Unsupported field '{field}'. Supported fields: model");
+            std::process::exit(2);
+        }
+    }
+}
+
+fn cmd_agent_set_model(config: Option<PathBuf>, agent_id_str: &str, model: &str) {
+    if model.trim().is_empty() {
+        eprintln!("Model cannot be empty.");
+        std::process::exit(2);
+    }
+
+    if let Some(base) = find_daemon() {
+        let client = daemon_client();
+        let body = daemon_json(
+            client
+                .put(format!("{base}/api/agents/{agent_id_str}/model"))
+                .json(&serde_json::json!({ "model": model }))
+                .send(),
+        );
+        if body.get("error").is_some() {
+            eprintln!(
+                "Failed to set model for agent {agent_id_str}: {}",
+                body["error"].as_str().unwrap_or("Unknown error")
+            );
+            std::process::exit(1);
+        } else {
+            println!("Agent {agent_id_str} model set to {model}.");
+        }
+        return;
+    }
+
+    let agent_id: AgentId = agent_id_str.parse().unwrap_or_else(|_| {
+        eprintln!("Invalid agent ID: {agent_id_str}");
+        std::process::exit(1);
+    });
+    let kernel = boot_kernel(config);
+    match kernel.set_agent_model(agent_id, model) {
+        Ok(()) => println!("Agent {agent_id} model set to {model}."),
+        Err(e) => {
+            eprintln!("Failed to set model for agent {agent_id}: {e}");
+            std::process::exit(1);
         }
     }
 }
@@ -5536,8 +5600,31 @@ fn cmd_reset(confirm: bool) {
 
 #[cfg(test)]
 mod tests {
+    use super::Cli;
+    use clap::Parser;
 
     // --- Doctor command unit tests ---
+
+    #[test]
+    fn test_agent_set_model_cli_parse() {
+        let cli = Cli::try_parse_from([
+            "openfang",
+            "agent",
+            "set",
+            "123e4567-e89b-12d3-a456-426614174000",
+            "model",
+            "gpt-4o",
+        ])
+        .expect("agent set model syntax should parse");
+        assert!(matches!(
+            cli.command,
+            Some(super::Commands::Agent(super::AgentCommands::Set {
+                ref agent_id,
+                ref field,
+                ref value,
+            })) if agent_id == "123e4567-e89b-12d3-a456-426614174000" && field == "model" && value == "gpt-4o"
+        ));
+    }
 
     #[test]
     fn test_doctor_skill_registry_loads_bundled() {
