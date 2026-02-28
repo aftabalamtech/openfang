@@ -22,6 +22,7 @@ FROM debian:bookworm-slim
 # 安装 CA 证书、FFmpeg、中文字体、Python 环境、Node.js 环境以及 Playwright 浏览器底层库
 RUN apt-get update && apt-get install -y \
     ca-certificates \
+    tzdata \
     ffmpeg \
     fonts-wqy-zenhei \
     libnss3 \
@@ -47,6 +48,10 @@ RUN apt-get update && apt-get install -y \
     npm \
     yt-dlp \
     && rm -rf /var/lib/apt/lists/*
+
+# 设置默认时区为上海（把时区直接烙印在镜像里）
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 独立执行 pip 安装，并添加绕过 Debian 限制的参数
 RUN pip3 install playwright --break-system-packages \
