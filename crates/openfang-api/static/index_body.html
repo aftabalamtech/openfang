@@ -2958,6 +2958,31 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                   <option :value="t" x-text="t"></option>
                 </template>
               </select>
+              <button class="btn btn-primary btn-sm" @click="showCustomModelForm = !showCustomModelForm" x-text="showCustomModelForm ? 'Cancel' : '+ Custom Model'"></button>
+            </div>
+            <!-- Custom model form -->
+            <div x-show="showCustomModelForm" class="info-card mb-4" style="border:1px solid var(--accent,#7c3aed)">
+              <h4 style="margin-top:0">Add Custom Model</h4>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+                <div>
+                  <label class="text-xs text-dim">Model ID (required)</label>
+                  <input class="form-input" x-model="customModelId" placeholder="e.g. my-org/my-model">
+                </div>
+                <div>
+                  <label class="text-xs text-dim">Provider</label>
+                  <input class="form-input" x-model="customModelProvider" placeholder="openrouter">
+                </div>
+                <div>
+                  <label class="text-xs text-dim">Context Window</label>
+                  <input class="form-input" type="number" x-model.number="customModelContext" placeholder="128000">
+                </div>
+                <div>
+                  <label class="text-xs text-dim">Max Output Tokens</label>
+                  <input class="form-input" type="number" x-model.number="customModelMaxOutput" placeholder="8192">
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm mt-2" @click="addCustomModel()" :disabled="!customModelId.trim()">Add Model</button>
+              <span class="text-xs text-dim ml-2" x-text="customModelStatus"></span>
             </div>
             <div class="text-xs text-dim mb-2" x-text="filteredModels.length + ' of ' + models.length + ' models'"></div>
             <div class="table-wrap" x-show="filteredModels.length">

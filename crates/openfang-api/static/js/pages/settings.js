@@ -14,6 +14,12 @@ function settingsPage() {
     modelSearch: '',
     modelProviderFilter: '',
     modelTierFilter: '',
+    showCustomModelForm: false,
+    customModelId: '',
+    customModelProvider: 'openrouter',
+    customModelContext: 128000,
+    customModelMaxOutput: 8192,
+    customModelStatus: '',
     providerKeyInputs: {},
     providerUrlInputs: {},
     providerUrlSaving: {},
@@ -225,6 +231,26 @@ function settingsPage() {
         var data = await OpenFangAPI.get('/api/models');
         this.models = data.models || [];
       } catch(e) { this.models = []; }
+    },
+
+    async addCustomModel() {
+      var id = this.customModelId.trim();
+      if (!id) return;
+      this.customModelStatus = 'Adding...';
+      try {
+        await OpenFangAPI.post('/api/models/custom', {
+          id: id,
+          provider: this.customModelProvider || 'openrouter',
+          context_window: this.customModelContext || 128000,
+          max_output_tokens: this.customModelMaxOutput || 8192,
+        });
+        this.customModelStatus = 'Added!';
+        this.customModelId = '';
+        this.showCustomModelForm = false;
+        await this.loadModels();
+      } catch(e) {
+        this.customModelStatus = 'Error: ' + (e.message || 'Failed');
+      }
     },
 
     async loadConfigSchema() {

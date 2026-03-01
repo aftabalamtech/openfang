@@ -1248,6 +1248,7 @@ fn write_config_if_missing(
             r#"# OpenFang Agent OS configuration
 # See https://github.com/RightNow-AI/openfang for documentation
 
+# For Docker, change to "0.0.0.0:4200" or set OPENFANG_LISTEN env var.
 api_listen = "127.0.0.1:4200"
 
 [default_model]
@@ -1913,6 +1914,7 @@ fn cmd_doctor(json: bool, repair: bool) {
                 let default_config = r#"# OpenFang Agent OS configuration
 # See https://github.com/RightNow-AI/openfang for documentation
 
+# For Docker, change to "0.0.0.0:4200" or set OPENFANG_LISTEN env var.
 api_listen = "127.0.0.1:4200"
 
 [default_model]

@@ -450,6 +450,14 @@ pub async fn build_router(
             "/api/models/aliases",
             axum::routing::get(routes::list_aliases),
         )
+        .route(
+            "/api/models/custom",
+            axum::routing::post(routes::add_custom_model),
+        )
+        .route(
+            "/api/models/custom/{*id}",
+            axum::routing::delete(routes::remove_custom_model),
+        )
         .route("/api/models/{*id}", axum::routing::get(routes::get_model))
         .route("/api/providers", axum::routing::get(routes::list_providers))
         // Copilot OAuth (must be before parametric {name} routes)

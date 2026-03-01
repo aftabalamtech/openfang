@@ -14,7 +14,9 @@ use crate::triggers::{TriggerEngine, TriggerId, TriggerPattern};
 use crate::workflow::{StepAgent, Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
 
 use openfang_memory::MemorySubstrate;
-use openfang_runtime::agent_loop::{run_agent_loop, run_agent_loop_streaming, AgentLoopResult};
+use openfang_runtime::agent_loop::{
+    run_agent_loop, run_agent_loop_streaming, strip_provider_prefix, AgentLoopResult,
+};
 use openfang_runtime::audit::AuditLog;
 use openfang_runtime::drivers;
 use openfang_runtime::kernel_handle::{self, KernelHandle};
@@ -483,6 +485,11 @@ impl OpenFangKernel {
     pub fn boot_with_config(mut config: KernelConfig) -> KernelResult<Self> {
         use openfang_types::config::KernelMode;
 
+        // Env var overrides — useful for Docker where config.toml is baked in.
+        if let Ok(listen) = std::env::var("OPENFANG_LISTEN") {
+            config.api_listen = listen;
+        }
+
         // Clamp configuration bounds to prevent zero-value or unbounded misconfigs
         config.clamp_bounds();
 
@@ -598,6 +605,9 @@ impl OpenFangKernel {
                 config.provider_urls.len()
             );
         }
+        // Load user's custom models from ~/.openfang/custom_models.json
+        let custom_models_path = config.home_dir.join("custom_models.json");
+        model_catalog.load_custom_models(&custom_models_path);
         let available_count = model_catalog.available_models().len();
         let total_count = model_catalog.list_models().len();
         let local_count = model_catalog
@@ -1890,7 +1900,7 @@ impl OpenFangKernel {
             router.resolve_aliases(&self.model_catalog.read().unwrap_or_else(|e| e.into_inner()));
             // Build a probe request to score complexity
             let probe = CompletionRequest {
-                model: manifest.model.model.clone(),
+                model: strip_provider_prefix(&manifest.model.model, &manifest.model.provider),
                 messages: vec![openfang_types::message::Message::user(message)],
                 tools: tools.clone(),
                 max_tokens: manifest.model.max_tokens,

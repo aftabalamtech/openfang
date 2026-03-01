@@ -4884,6 +4884,134 @@ pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResp
     )
 }
 
+/// POST /api/models/custom — Add a custom model to the catalog.
+///
+/// Persists to `~/.openfang/custom_models.json` and makes the model immediately
+/// available for agent assignment.
+pub async fn add_custom_model(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let provider = body
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("openrouter")
+        .to_string();
+    let context_window = body
+        .get("context_window")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(128_000);
+    let max_output = body
+        .get("max_output_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(8_192);
+
+    if id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing required field: id"})),
+        );
+    }
+
+    let display = body
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&id)
+        .to_string();
+
+    let entry = openfang_types::model_catalog::ModelCatalogEntry {
+        id: id.clone(),
+        display_name: display,
+        provider: provider.clone(),
+        tier: openfang_types::model_catalog::ModelTier::Custom,
+        context_window,
+        max_output_tokens: max_output,
+        input_cost_per_m: body
+            .get("input_cost_per_m")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        output_cost_per_m: body
+            .get("output_cost_per_m")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        supports_tools: body
+            .get("supports_tools")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        supports_vision: body
+            .get("supports_vision")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        supports_streaming: body
+            .get("supports_streaming")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        aliases: vec![],
+    };
+
+    let mut catalog = state
+        .kernel
+        .model_catalog
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+
+    if !catalog.add_custom_model(entry) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": format!("Model '{}' already exists", id)})),
+        );
+    }
+
+    // Persist to disk
+    let custom_path = state.kernel.config.home_dir.join("custom_models.json");
+    if let Err(e) = catalog.save_custom_models(&custom_path) {
+        tracing::warn!("Failed to persist custom models: {e}");
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": id,
+            "provider": provider,
+            "status": "added"
+        })),
+    )
+}
+
+/// DELETE /api/models/custom/{id} — Remove a custom model.
+pub async fn remove_custom_model(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(model_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let mut catalog = state
+        .kernel
+        .model_catalog
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+
+    if !catalog.remove_custom_model(&model_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Custom model '{}' not found", model_id)})),
+        );
+    }
+
+    let custom_path = state.kernel.config.home_dir.join("custom_models.json");
+    if let Err(e) = catalog.save_custom_models(&custom_path) {
+        tracing::warn!("Failed to persist custom models: {e}");
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"status": "removed"})),
+    )
+}
+
 // ── A2A (Agent-to-Agent) Protocol Endpoints ─────────────────────────
 
 /// GET /.well-known/agent.json — A2A Agent Card for the default agent.

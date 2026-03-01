@@ -214,6 +214,73 @@ impl ModelCatalog {
             }
         }
     }
+
+    /// Add a custom model at runtime.
+    ///
+    /// Returns `true` if the model was added, `false` if a model with that ID
+    /// already exists (case-insensitive).
+    pub fn add_custom_model(&mut self, entry: ModelCatalogEntry) -> bool {
+        let lower = entry.id.to_lowercase();
+        if self.models.iter().any(|m| m.id.to_lowercase() == lower) {
+            return false;
+        }
+        let provider = entry.provider.clone();
+        self.models.push(entry);
+
+        // Update provider model count
+        if let Some(p) = self.providers.iter_mut().find(|p| p.id == provider) {
+            p.model_count = self
+                .models
+                .iter()
+                .filter(|m| m.provider == provider)
+                .count();
+        }
+        true
+    }
+
+    /// Remove a custom model by ID.
+    ///
+    /// Only removes models with `Custom` tier to prevent accidental deletion
+    /// of builtin models. Returns `true` if removed.
+    pub fn remove_custom_model(&mut self, model_id: &str) -> bool {
+        let lower = model_id.to_lowercase();
+        let before = self.models.len();
+        self.models
+            .retain(|m| !(m.id.to_lowercase() == lower && m.tier == ModelTier::Custom));
+        self.models.len() < before
+    }
+
+    /// Load custom models from a JSON file.
+    ///
+    /// Merges them into the catalog. Skips models that already exist.
+    pub fn load_custom_models(&mut self, path: &std::path::Path) {
+        if !path.exists() {
+            return;
+        }
+        let Ok(data) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(entries) = serde_json::from_str::<Vec<ModelCatalogEntry>>(&data) else {
+            return;
+        };
+        for entry in entries {
+            self.add_custom_model(entry);
+        }
+    }
+
+    /// Save all custom-tier models to a JSON file.
+    pub fn save_custom_models(&self, path: &std::path::Path) -> Result<(), String> {
+        let custom: Vec<&ModelCatalogEntry> = self
+            .models
+            .iter()
+            .filter(|m| m.tier == ModelTier::Custom)
+            .collect();
+        let json = serde_json::to_string_pretty(&custom)
+            .map_err(|e| format!("Failed to serialize custom models: {e}"))?;
+        std::fs::write(path, json)
+            .map_err(|e| format!("Failed to write custom models file: {e}"))?;
+        Ok(())
+    }
 }
 
 impl Default for ModelCatalog {
@@ -1301,7 +1368,7 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec![],
         },
         // ══════════════════════════════════════════════════════════════
-        // OpenRouter (5)
+        // OpenRouter (11)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
             id: "openrouter/auto".into(),
@@ -1370,6 +1437,76 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             output_cost_per_m: 0.60,
             supports_tools: true,
             supports_vision: true,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "openrouter/meta-llama/llama-3.3-70b-instruct".into(),
+            display_name: "Llama 3.3 70B (OpenRouter, free)".into(),
+            provider: "openrouter".into(),
+            tier: ModelTier::Balanced,
+            context_window: 128_000,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "openrouter/mistralai/mistral-7b-instruct".into(),
+            display_name: "Mistral 7B (OpenRouter, free)".into(),
+            provider: "openrouter".into(),
+            tier: ModelTier::Fast,
+            context_window: 32_768,
+            max_output_tokens: 8_192,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: false,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "openrouter/google/gemma-2-9b-it".into(),
+            display_name: "Gemma 2 9B (OpenRouter, free)".into(),
+            provider: "openrouter".into(),
+            tier: ModelTier::Fast,
+            context_window: 8_192,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: false,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "openrouter/qwen/qwen-2.5-72b-instruct".into(),
+            display_name: "Qwen 2.5 72B (OpenRouter, free)".into(),
+            provider: "openrouter".into(),
+            tier: ModelTier::Balanced,
+            context_window: 128_000,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "openrouter/deepseek/deepseek-chat-v3-0324".into(),
+            display_name: "DeepSeek V3 0324 (OpenRouter)".into(),
+            provider: "openrouter".into(),
+            tier: ModelTier::Smart,
+            context_window: 128_000,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.14,
+            output_cost_per_m: 0.28,
+            supports_tools: true,
+            supports_vision: false,
             supports_streaming: true,
             aliases: vec![],
         },

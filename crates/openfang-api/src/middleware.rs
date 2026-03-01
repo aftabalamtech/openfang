@@ -108,6 +108,8 @@ pub async fn auth(
         || path == "/api/integrations"
         || path == "/api/integrations/available"
         || path == "/api/integrations/health"
+        || path == "/api/workflows"
+        || path == "/api/logs/stream"
         || path.starts_with("/api/cron/")
         || path.starts_with("/api/providers/github-copilot/oauth/")
     {
