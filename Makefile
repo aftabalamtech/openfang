@@ -17,6 +17,7 @@ BIN         := openfang
 RELEASE_BIN := target/release/$(BIN)
 DEBUG_BIN   := target/debug/$(BIN)
 CRATES      := $(shell find crates -maxdepth 1 -mindepth 1 -type d | wc -l)
+BANNER      := public/assets/ascii/banner.txt
 
 # Colors (only when stdout is a terminal)
 ifneq ($(TERM),)
@@ -185,10 +186,16 @@ clean: ## Remove build artifacts
 
 .PHONY: help
 help: ## Show this help
-	@printf "\n"
-	@printf "  $(BOLD)OpenFang$(RESET) — Agent Operating System\n"
-	@printf "  $(DIM)https://github.com/RightNow-AI/openfang$(RESET)\n"
-	@printf "\n"
+	@if [ -t 1 ] && [ "$$(tput cols 2>/dev/null || echo 0)" -ge 80 ] && [ -f $(BANNER) ]; then \
+	    printf "\n"; \
+	    sed 's/\x1b\[?25[lh]//g' $(BANNER); \
+	    printf "\n"; \
+	else \
+	    printf "\n"; \
+	    printf "  $(BOLD)OpenFang$(RESET) — Agent Operating System\n"; \
+	    printf "  $(DIM)https://github.com/RightNow-AI/openfang$(RESET)\n"; \
+	    printf "\n"; \
+	fi
 	@printf "  $(BOLD)Usage:$(RESET)  make $(CYAN)<target>$(RESET)\n\n"
 	@awk 'BEGIN {FS = ":.*##"} \
 	    /^[a-zA-Z_-]+:.*##/ { \
