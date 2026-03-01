@@ -99,6 +99,10 @@ async fn start_test_server_with_provider(
             axum::routing::delete(routes::kill_agent),
         )
         .route(
+            "/api/agents/{id}/history",
+            axum::routing::delete(routes::clear_agent_history),
+        )
+        .route(
             "/api/triggers",
             axum::routing::get(routes::list_triggers).post(routes::create_trigger),
         )
@@ -851,4 +855,95 @@ async fn test_auth_disabled_when_no_key() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_clear_agent_history() {
+    let server = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // --- Spawn agent ---
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": TEST_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_id = body["agent_id"].as_str().unwrap().to_string();
+
+    // --- Verify session exists (empty but present) ---
+    let resp = client
+        .get(format!(
+            "{}/api/agents/{}/session",
+            server.base_url, agent_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // --- Clear history ---
+    let resp = client
+        .delete(format!(
+            "{}/api/agents/{}/history",
+            server.base_url, agent_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 204);
+
+    // --- Verify agent still exists after clearing history ---
+    let resp = client
+        .get(format!("{}/api/agents", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let agents: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(agents.len(), 1); // Agent still alive
+
+    // --- Cleanup: kill agent ---
+    let resp = client
+        .delete(format!("{}/api/agents/{}", server.base_url, agent_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_clear_history_nonexistent_agent_returns_404() {
+    let server = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let fake_agent_id = "550e8400-e29b-41d4-a716-446655440000";
+    let resp = client
+        .delete(format!(
+            "{}/api/agents/{}/history",
+            server.base_url, fake_agent_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "Agent not found");
+}
+
+#[tokio::test]
+async fn test_clear_history_invalid_agent_id_returns_400() {
+    let server = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .delete(format!("{}/api/agents/invalid-id/history", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "Invalid agent ID");
 }

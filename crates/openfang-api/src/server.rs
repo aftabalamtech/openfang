@@ -165,6 +165,10 @@ pub async fn build_router(
             axum::routing::post(routes::compact_session),
         )
         .route(
+            "/api/agents/{id}/history",
+            axum::routing::delete(routes::clear_agent_history),
+        )
+        .route(
             "/api/agents/{id}/stop",
             axum::routing::post(routes::stop_agent),
         )

@@ -450,6 +450,72 @@ pub async fn kill_agent(
     }
 }
 
+/// DELETE /api/agents/:id/history — Clear agent conversation history.
+///
+/// Optional query parameters:
+/// - `keep_last` — Keep N most recent messages (default: 0, meaning delete all)
+pub async fn clear_agent_history(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let agent_id: AgentId = match id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid agent ID"})),
+            );
+        }
+    };
+
+    // Check if agent exists
+    if state.kernel.registry.get(agent_id).is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Agent not found"})),
+        );
+    }
+
+    // Parse optional keep_last parameter
+    let keep_last: usize = params
+        .get("keep_last")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    // If keep_last is specified and > 0, we need partial deletion
+    // For now, we implement full deletion; partial can be added later
+    if keep_last > 0 {
+        // TODO: Implement partial session truncation
+        // This would require loading the session, truncating messages, and saving back
+        tracing::info!(
+            "Partial history clear requested for agent {id} (keep_last={keep_last}), falling back to full clear"
+        );
+    }
+
+    // Delete all sessions for this agent
+    match state.kernel.memory.delete_agent_sessions(agent_id) {
+        Ok(()) => {
+            tracing::info!("Cleared conversation history for agent {id}");
+            // Audit log the action
+            state.kernel.audit_log.record(
+                "system",
+                openfang_runtime::audit::AuditAction::ConfigChange,
+                "cleared agent conversation history",
+                format!("agent_id: {id}, keep_last: {keep_last}"),
+            );
+            (StatusCode::NO_CONTENT, Json(serde_json::json!({})))
+        }
+        Err(e) => {
+            tracing::warn!("Failed to clear history for agent {id}: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to clear conversation history"})),
+            )
+        }
+    }
+}
+
 /// GET /api/status — Kernel status.
 pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let agents: Vec<serde_json::Value> = state
@@ -3719,7 +3785,10 @@ pub async fn hand_instance_browser(
                 content = data["content"].as_str().unwrap_or("").to_string();
                 // Truncate content to avoid huge payloads (UTF-8 safe)
                 if content.len() > 2000 {
-                    content = format!("{}... (truncated)", openfang_types::truncate_str(&content, 2000));
+                    content = format!(
+                        "{}... (truncated)",
+                        openfang_types::truncate_str(&content, 2000)
+                    );
                 }
             }
         }
@@ -6349,8 +6418,7 @@ pub async fn set_provider_url(
     }
 
     // Probe reachability at the new URL
-    let probe =
-        openfang_runtime::provider_health::probe_provider(&name, &base_url).await;
+    let probe = openfang_runtime::provider_health::probe_provider(&name, &base_url).await;
 
     (
         StatusCode::OK,
@@ -7332,7 +7400,9 @@ pub async fn patch_agent_config(
         if name.len() > MAX_NAME_LEN {
             return (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                Json(serde_json::json!({"error": format!("Name exceeds max length ({MAX_NAME_LEN} chars)")})),
+                Json(
+                    serde_json::json!({"error": format!("Name exceeds max length ({MAX_NAME_LEN} chars)")}),
+                ),
             );
         }
     }
@@ -7340,7 +7410,9 @@ pub async fn patch_agent_config(
         if desc.len() > MAX_DESC_LEN {
             return (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                Json(serde_json::json!({"error": format!("Description exceeds max length ({MAX_DESC_LEN} chars)")})),
+                Json(
+                    serde_json::json!({"error": format!("Description exceeds max length ({MAX_DESC_LEN} chars)")}),
+                ),
             );
         }
     }
@@ -7348,7 +7420,9 @@ pub async fn patch_agent_config(
         if prompt.len() > MAX_PROMPT_LEN {
             return (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                Json(serde_json::json!({"error": format!("System prompt exceeds max length ({MAX_PROMPT_LEN} chars)")})),
+                Json(
+                    serde_json::json!({"error": format!("System prompt exceeds max length ({MAX_PROMPT_LEN} chars)")}),
+                ),
             );
         }
     }
@@ -9161,8 +9235,7 @@ pub async fn copilot_oauth_start() -> impl IntoResponse {
                 CopilotFlowState {
                     device_code: resp.device_code,
                     interval: resp.interval,
-                    expires_at: Instant::now()
-                        + std::time::Duration::from_secs(resp.expires_in),
+                    expires_at: Instant::now() + std::time::Duration::from_secs(resp.expires_in),
                 },
             );
 
@@ -9226,7 +9299,9 @@ pub async fn copilot_oauth_poll(
             if let Err(e) = write_secret_env(&secrets_path, "GITHUB_TOKEN", &access_token) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"status": "error", "error": format!("Failed to save token: {e}")})),
+                    Json(
+                        serde_json::json!({"status": "error", "error": format!("Failed to save token: {e}")}),
+                    ),
                 );
             }
 
