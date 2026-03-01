@@ -2311,7 +2311,7 @@ impl OpenFangKernel {
                 .take(5)
                 .enumerate()
                 .map(|(i, t)| {
-                    let truncated = if t.len() > 200 { &t[..200] } else { t };
+                    let truncated = openfang_types::truncate_str(t, 200);
                     format!("{}. {}", i + 1, truncated)
                 })
                 .collect::<Vec<_>>()

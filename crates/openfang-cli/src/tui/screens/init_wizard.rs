@@ -1913,11 +1913,7 @@ fn draw_routing_pick(f: &mut Frame, area: Rect, state: &mut State, tier: usize) 
                 .split('/')
                 .next_back()
                 .unwrap_or(&state.routing_models[t]);
-            let display = if short.len() > 14 {
-                &short[..14]
-            } else {
-                short
-            };
+            let display = openfang_types::truncate_str(short, 14);
             summary_spans.push(Span::styled(
                 format!("{name}:{display}"),
                 Style::default().fg(*c),
