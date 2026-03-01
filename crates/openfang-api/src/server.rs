@@ -336,6 +336,11 @@ pub async fn build_router(
             axum::routing::post(routes::install_hand_deps),
         )
         .route(
+            "/api/hands/{hand_id}/settings",
+            axum::routing::get(routes::get_hand_settings)
+                .put(routes::update_hand_settings),
+        )
+        .route(
             "/api/hands/instances/{id}/pause",
             axum::routing::post(routes::pause_hand),
         )
@@ -376,6 +381,27 @@ pub async fn build_router(
         .route(
             "/api/network/status",
             axum::routing::get(routes::network_status),
+        )
+        // Agent communication (Comms) endpoints
+        .route(
+            "/api/comms/topology",
+            axum::routing::get(routes::comms_topology),
+        )
+        .route(
+            "/api/comms/events",
+            axum::routing::get(routes::comms_events),
+        )
+        .route(
+            "/api/comms/events/stream",
+            axum::routing::get(routes::comms_events_stream),
+        )
+        .route(
+            "/api/comms/send",
+            axum::routing::post(routes::comms_send),
+        )
+        .route(
+            "/api/comms/task",
+            axum::routing::post(routes::comms_task),
         )
         // Tools endpoint
         .route("/api/tools", axum::routing::get(routes::list_tools))

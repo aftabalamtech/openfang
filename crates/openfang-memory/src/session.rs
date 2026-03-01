@@ -556,6 +556,7 @@ impl SessionStore {
                             }
                             ContentBlock::ToolResult {
                                 tool_use_id,
+                                tool_name: _,
                                 content,
                                 is_error,
                             } => {
