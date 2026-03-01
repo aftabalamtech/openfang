@@ -81,7 +81,7 @@ pub struct CompactionResult {
 
 /// Check whether a session needs compaction (message-count trigger).
 pub fn needs_compaction(session: &Session, config: &CompactionConfig) -> bool {
-    session.messages.len() > config.threshold
+    session.messages.len() >= config.threshold
 }
 
 /// Estimate token count for a set of messages, optional system prompt, and tool definitions.

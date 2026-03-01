@@ -1285,7 +1285,16 @@ impl OpenFangKernel {
                 estimate_token_count, needs_compaction as check_compact,
                 needs_compaction_by_tokens, CompactionConfig,
             };
-            let config = CompactionConfig::default();
+            // Build CompactionConfig from TOML config instead of using hardcoded defaults
+            let toml_cfg = &self.config.compaction;
+            let config = CompactionConfig {
+                threshold: toml_cfg.threshold,
+                keep_recent: toml_cfg.keep_recent,
+                max_summary_tokens: toml_cfg.max_summary_tokens,
+                token_threshold_ratio: toml_cfg.token_threshold_ratio,
+                context_window_tokens: toml_cfg.context_window_tokens,
+                ..CompactionConfig::default()
+            };
             let by_messages = check_compact(&session, &config);
             let estimated = estimate_token_count(
                 &session.messages,

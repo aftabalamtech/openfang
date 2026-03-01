@@ -1039,6 +1039,9 @@ pub struct KernelConfig {
     /// Global spending budget configuration.
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// Session compaction configuration.
+    #[serde(default)]
+    pub compaction: CompactionTomlConfig,
     /// Provider base URL overrides (provider ID → custom base URL).
     /// e.g. `ollama = "http://192.168.1.100:11434/v1"`
     #[serde(default)]
@@ -1098,6 +1101,43 @@ impl Default for BudgetConfig {
 
 fn default_max_cron_jobs() -> usize {
     500
+}
+
+/// Session compaction configuration (TOML-friendly).
+///
+/// Configure in config.toml:
+/// ```toml
+/// [compaction]
+/// threshold = 25
+/// keep_recent = 10
+/// token_threshold_ratio = 0.7
+/// context_window_tokens = 200000
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompactionTomlConfig {
+    /// Compact when session message count exceeds this (default: 25).
+    pub threshold: usize,
+    /// Number of recent messages to keep verbatim after compaction (default: 10).
+    pub keep_recent: usize,
+    /// Maximum tokens for the compaction summary (default: 1024).
+    pub max_summary_tokens: u32,
+    /// Ratio of context window that triggers token-based compaction (default: 0.7).
+    pub token_threshold_ratio: f64,
+    /// Model context window size in tokens (default: 200000).
+    pub context_window_tokens: usize,
+}
+
+impl Default for CompactionTomlConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 25,
+            keep_recent: 10,
+            max_summary_tokens: 1024,
+            token_threshold_ratio: 0.7,
+            context_window_tokens: 200_000,
+        }
+    }
 }
 
 /// Configuration entry for an MCP server.
@@ -1305,6 +1345,13 @@ impl std::fmt::Debug for KernelConfig {
                 &format!("{} provider(s)", self.auth_profiles.len()),
             )
             .field("thinking", &self.thinking.is_some())
+            .field(
+                "compaction",
+                &format!(
+                    "threshold={} keep_recent={}",
+                    self.compaction.threshold, self.compaction.keep_recent
+                ),
+            )
             .finish()
     }
 }
@@ -1436,6 +1483,11 @@ pub struct ChannelsConfig {
     pub telegram: Option<TelegramConfig>,
     /// Discord bot configuration (None = disabled).
     pub discord: Option<DiscordConfig>,
+    /// Additional Discord bots (multi-bot routing).
+    /// Each entry connects a separate bot with its own token and default agent.
+    /// Configure in config.toml as `[[channels.extra_discord]]`.
+    #[serde(default)]
+    pub extra_discord: Vec<DiscordConfig>,
     /// Slack bot configuration (None = disabled).
     pub slack: Option<SlackConfig>,
     /// WhatsApp Cloud API configuration (None = disabled).

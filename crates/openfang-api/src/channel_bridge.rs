@@ -992,6 +992,7 @@ pub async fn start_channel_bridge_with_config(
 ) -> (Option<BridgeManager>, Vec<String>) {
     let has_any = config.telegram.is_some()
         || config.discord.is_some()
+        || !config.extra_discord.is_empty()
         || config.slack.is_some()
         || config.whatsapp.is_some()
         || config.signal.is_some()
@@ -1059,7 +1060,7 @@ pub async fn start_channel_bridge_with_config(
         }
     }
 
-    // Discord
+    // Discord (primary)
     if let Some(ref dc_config) = config.discord {
         if let Some(token) = read_token(&dc_config.bot_token_env, "Discord") {
             let adapter = Arc::new(DiscordAdapter::new(
@@ -1068,6 +1069,19 @@ pub async fn start_channel_bridge_with_config(
                 dc_config.intents,
             ));
             adapters.push((adapter, dc_config.default_agent.clone()));
+        }
+    }
+
+    // Discord (extra bots — multi-bot routing)
+    for (i, dc_config) in config.extra_discord.iter().enumerate() {
+        if let Some(token) = read_token(&dc_config.bot_token_env, &format!("Discord extra #{}", i + 1)) {
+            let adapter = Arc::new(DiscordAdapter::new(
+                token,
+                dc_config.allowed_guilds.clone(),
+                dc_config.intents,
+            ));
+            adapters.push((adapter, dc_config.default_agent.clone()));
+            info!("Discord extra bot #{} started (env: {})", i + 1, dc_config.bot_token_env);
         }
     }
 
