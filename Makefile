@@ -126,6 +126,12 @@ start: build ## Start the OpenFang daemon
 	@printf "$(CYAN)>>$(RESET) $(BOLD)Starting daemon…$(RESET)\n"
 	@$(DEBUG_BIN) start
 
+.PHONY: stop
+stop: build ## Stop the running daemon
+	@printf "$(CYAN)>>$(RESET) $(BOLD)Stopping daemon…$(RESET)\n"
+	@$(DEBUG_BIN) stop
+	@printf "$(GREEN)✔$(RESET) Daemon stopped\n"
+
 .PHONY: doctor
 doctor: build ## Run system diagnostics
 	@printf "$(CYAN)>>$(RESET) $(BOLD)Running doctor…$(RESET)\n"
