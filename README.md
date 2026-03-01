@@ -357,7 +357,7 @@ Roadmap below prioritizes reliability and maintainability across existing module
 ### Phase 1 (Next 30 days) — Reliability Baseline
 
 - `openfang-runtime`: build a unified tool execution policy engine (quota/timeout/retry/audit) for all tools, and add deterministic replay for agent-loop production incident debugging.
-- `openfang-api`: add contract tests for key REST/SSE/WS flows and harden stream backpressure limits.
+- `openfang-api`: version endpoints under `/api/v1`, add automated contract tests across API/dashboard/SDK, and enforce explicit SSE/WS backpressure (stream session limits + timeout policy).
 - `openfang-channels`: ship adapter conformance test kit shared by all channel implementations.
 - `openfang-kernel`: standardize internal event contracts with explicit schema + versioning to reduce side effects when adding new features.
 
