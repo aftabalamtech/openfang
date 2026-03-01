@@ -27,6 +27,13 @@ impl OpenAIDriver {
             client: reqwest::Client::new(),
         }
     }
+
+    fn normalized_model(&self, model: &str) -> String {
+        if self.base_url.contains("openrouter.ai") {
+            return crate::agent_loop::strip_provider_prefix(model, "openrouter");
+        }
+        model.trim().to_string()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -277,7 +284,7 @@ impl LlmDriver for OpenAIDriver {
         };
 
         let mut oai_request = OaiRequest {
-            model: request.model.clone(),
+            model: self.normalized_model(&request.model),
             messages: oai_messages,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
@@ -556,7 +563,7 @@ impl LlmDriver for OpenAIDriver {
         };
 
         let mut oai_request = OaiRequest {
-            model: request.model.clone(),
+            model: self.normalized_model(&request.model),
             messages: oai_messages,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
@@ -949,5 +956,29 @@ mod tests {
         assert!(result.is_some());
         let resp = result.unwrap();
         assert_eq!(resp.tool_calls[0].name, "shell_exec");
+    }
+
+    #[test]
+    fn test_normalized_model_for_openrouter_strips_prefix() {
+        let driver = OpenAIDriver::new(
+            "test-key".to_string(),
+            "https://openrouter.ai/api/v1".to_string(),
+        );
+        assert_eq!(
+            driver.normalized_model("openrouter/google/gemini-2.5-flash"),
+            "google/gemini-2.5-flash"
+        );
+    }
+
+    #[test]
+    fn test_normalized_model_for_non_openrouter_keeps_model() {
+        let driver = OpenAIDriver::new(
+            "test-key".to_string(),
+            "https://api.openai.com/v1".to_string(),
+        );
+        assert_eq!(
+            driver.normalized_model("openrouter/google/gemini-2.5-flash"),
+            "openrouter/google/gemini-2.5-flash"
+        );
     }
 }
