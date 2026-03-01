@@ -110,6 +110,11 @@ install() {
     tar xzf "$ARCHIVE" -C "$INSTALL_DIR"
     chmod +x "$INSTALL_DIR/openfang"
 
+    # macOS on Apple Silicon requires a valid code signature
+    if [ "$OS" = "darwin" ] && command -v codesign &>/dev/null; then
+        codesign --force --sign - "$INSTALL_DIR/openfang" 2>/dev/null || true
+    fi
+
     # Add to PATH
     SHELL_RC=""
     case "${SHELL:-}" in
