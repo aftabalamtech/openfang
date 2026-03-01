@@ -36,7 +36,12 @@ pub struct AppState {
     /// ClawHub response cache — prevents 429 rate limiting on rapid dashboard refreshes.
     /// Maps cache key → (fetched_at, response_json) with 120s TTL.
     pub clawhub_cache: DashMap<String, (Instant, serde_json::Value)>,
+    /// Budget overrides — safe mutable budget config (replaces unsafe ptr mutation).
+    pub budget_overrides: std::sync::RwLock<Option<openfang_types::config::BudgetConfig>>,
 }
+
+/// Mutex to serialize `set_var` / `remove_var` calls (inherently unsafe in multi-threaded Rust 2024).
+static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// POST /api/agents — Spawn a new agent.
 pub async fn spawn_agent(
@@ -1978,9 +1983,11 @@ pub async fn configure_channel(
                     Json(serde_json::json!({"error": format!("Failed to write secret: {e}")})),
                 );
             }
-            // SAFETY: We are the only writer; this is a single-threaded config operation
-            unsafe {
-                std::env::set_var(env_var, value);
+            // SAFETY: env var mutation is inherently unsafe in multi-threaded Rust 2024.
+            // The ENV_MUTEX serializes all set_var/remove_var calls.
+            {
+                let _guard = ENV_MUTEX.lock().unwrap();
+                unsafe { std::env::set_var(env_var, value); }
             }
         } else {
             // Config field — collect for TOML write
@@ -2053,9 +2060,11 @@ pub async fn remove_channel(
     for field_def in meta.fields {
         if let Some(env_var) = field_def.env_var {
             let _ = remove_secret_env(&secrets_path, env_var);
-            // SAFETY: Single-threaded config operation
-            unsafe {
-                std::env::remove_var(env_var);
+            // SAFETY: env var mutation is inherently unsafe in multi-threaded Rust 2024.
+            // The ENV_MUTEX serializes all set_var/remove_var calls.
+            {
+                let _guard = ENV_MUTEX.lock().unwrap();
+                unsafe { std::env::remove_var(env_var); }
             }
         }
     }
@@ -4220,7 +4229,7 @@ pub async fn network_status(State(state): State<Arc<AppState>>) -> impl IntoResp
         && !state.kernel.config.network.shared_secret.is_empty();
 
     let (node_id, listen_address, connected_peers, total_peers) =
-        if let Some(ref peer_node) = state.kernel.peer_node {
+        if let Some(peer_node) = state.kernel.peer_node.get() {
             let registry = peer_node.registry();
             (
                 peer_node.node_id().to_string(),
@@ -4401,10 +4410,14 @@ pub async fn usage_daily(State(state): State<Arc<AppState>>) -> impl IntoRespons
 
 /// GET /api/budget — Current budget status (limits, spend, % used).
 pub async fn budget_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let status = state
-        .kernel
-        .metering
-        .budget_status(&state.kernel.config.budget);
+    // Check for in-memory overrides first, fall back to kernel config.
+    let budget = state
+        .budget_overrides
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| state.kernel.config.budget.clone());
+    let status = state.kernel.metering.budget_status(&budget);
     Json(serde_json::to_value(&status).unwrap_or_default())
 }
 
@@ -4413,31 +4426,31 @@ pub async fn update_budget(
     State(state): State<Arc<AppState>>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    // SAFETY: Budget config is updated in-place. Since KernelConfig is behind
-    // an Arc and we only have &self, we use ptr mutation (same pattern as OFP).
-    let config_ptr = &state.kernel.config as *const openfang_types::config::KernelConfig
-        as *mut openfang_types::config::KernelConfig;
+    // Read current budget from overrides or kernel config, apply updates to a mutable copy,
+    // then store back into the RwLock. No unsafe pointer casts required.
+    let mut budget = state
+        .budget_overrides
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| state.kernel.config.budget.clone());
 
-    // Apply updates
-    unsafe {
-        if let Some(v) = body["max_hourly_usd"].as_f64() {
-            (*config_ptr).budget.max_hourly_usd = v;
-        }
-        if let Some(v) = body["max_daily_usd"].as_f64() {
-            (*config_ptr).budget.max_daily_usd = v;
-        }
-        if let Some(v) = body["max_monthly_usd"].as_f64() {
-            (*config_ptr).budget.max_monthly_usd = v;
-        }
-        if let Some(v) = body["alert_threshold"].as_f64() {
-            (*config_ptr).budget.alert_threshold = v.clamp(0.0, 1.0);
-        }
+    if let Some(v) = body["max_hourly_usd"].as_f64() {
+        budget.max_hourly_usd = v;
+    }
+    if let Some(v) = body["max_daily_usd"].as_f64() {
+        budget.max_daily_usd = v;
+    }
+    if let Some(v) = body["max_monthly_usd"].as_f64() {
+        budget.max_monthly_usd = v;
+    }
+    if let Some(v) = body["alert_threshold"].as_f64() {
+        budget.alert_threshold = v.clamp(0.0, 1.0);
     }
 
-    let status = state
-        .kernel
-        .metering
-        .budget_status(&state.kernel.config.budget);
+    *state.budget_overrides.write().unwrap() = Some(budget.clone());
+
+    let status = state.kernel.metering.budget_status(&budget);
     Json(serde_json::to_value(&status).unwrap_or_default())
 }
 
@@ -8189,7 +8202,10 @@ pub async fn upload_file(
         .get("X-Filename")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("upload")
+        .replace(['/', '\\'], "")
+        .replace("..", "")
         .to_string();
+    let filename = if filename.is_empty() { "upload".to_string() } else { filename };
 
     // Validate size
     if body.len() > MAX_UPLOAD_SIZE {

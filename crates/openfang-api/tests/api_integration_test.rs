@@ -77,6 +77,7 @@ async fn start_test_server_with_provider(
         channels_config: tokio::sync::RwLock::new(Default::default()),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
         clawhub_cache: dashmap::DashMap::new(),
+        budget_overrides: std::sync::RwLock::new(None),
     });
 
     let app = Router::new()
@@ -704,6 +705,7 @@ async fn start_test_server_with_auth(api_key: &str) -> TestServer {
         channels_config: tokio::sync::RwLock::new(Default::default()),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
         clawhub_cache: dashmap::DashMap::new(),
+        budget_overrides: std::sync::RwLock::new(None),
     });
 
     let api_key_state = state.kernel.config.api_key.clone();

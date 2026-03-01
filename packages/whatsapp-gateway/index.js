@@ -14,6 +14,7 @@ const ALLOWED_NUMBERS = (process.env.WHATSAPP_ALLOWED_USERS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+const MAX_MESSAGE_LENGTH = 4096;
 
 // ---------------------------------------------------------------------------
 // State
@@ -154,10 +155,16 @@ async function startConnection() {
       if (msg.message?.protocolMessage || msg.message?.reactionMessage) continue;
 
       const sender = msg.key.remoteJid || '';
-      const text = msg.message?.conversation
+      let text = msg.message?.conversation
         || msg.message?.extendedTextMessage?.text
         || msg.message?.imageMessage?.caption
         || '';
+
+      // Truncate oversized messages to prevent abuse
+      if (text.length > MAX_MESSAGE_LENGTH) {
+        console.log(`[gateway] Truncating message from ${text.length} to ${MAX_MESSAGE_LENGTH} chars`);
+        text = text.substring(0, MAX_MESSAGE_LENGTH);
+      }
 
       if (!text) continue;
 

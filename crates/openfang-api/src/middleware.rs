@@ -90,9 +90,7 @@ pub async fn auth(
         || path == "/api/health/detail"
         || path == "/api/status"
         || path == "/api/version"
-        || path == "/api/agents"
         || path == "/api/profiles"
-        || path == "/api/config"
         || path.starts_with("/api/uploads/")
         // Dashboard read endpoints — allow unauthenticated so the SPA can
         // render before the user enters their API key.
