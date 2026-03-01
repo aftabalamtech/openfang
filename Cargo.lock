@@ -4303,6 +4303,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion",
+ "dashmap",
  "hex",
  "hmac",
  "openfang-types",
