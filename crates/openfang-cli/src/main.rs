@@ -4943,22 +4943,71 @@ fn cmd_models_set(model: Option<String>) {
         Some(m) => m,
         None => pick_model(),
     };
+
+    // Resolve aliases so config stores canonical model IDs.
+    let catalog = openfang_runtime::model_catalog::ModelCatalog::new();
+    let resolved_model = catalog
+        .resolve_alias(&model)
+        .unwrap_or(model.as_str())
+        .to_string();
+    let selected_model = catalog.find_model(&resolved_model);
+    let selected_provider = selected_model
+        .map(|m| m.provider.clone())
+        .unwrap_or_default();
+    let selected_api_key_env = if selected_provider.is_empty() {
+        String::new()
+    } else {
+        catalog
+            .get_provider(&selected_provider)
+            .map(|p| p.api_key_env.clone())
+            .unwrap_or_else(|| provider_to_env_var(&selected_provider))
+    };
+
     let base = require_daemon("models set");
     let client = daemon_client();
-    // Use the config set approach through the API
-    let body = daemon_json(
-        client
-            .post(format!("{base}/api/config/set"))
-            .json(&serde_json::json!({"key": "default_model.model", "value": model}))
-            .send(),
-    );
-    if body.get("error").is_some() {
-        ui::error(&format!(
-            "Failed to set model: {}",
-            body["error"].as_str().unwrap_or("?")
+
+    // Use the config set approach through the API.
+    let mut updates = vec![(
+        "default_model.model".to_string(),
+        serde_json::Value::String(resolved_model.clone()),
+    )];
+    if !selected_provider.is_empty() {
+        updates.push((
+            "default_model.provider".to_string(),
+            serde_json::Value::String(selected_provider.clone()),
+        ));
+        updates.push((
+            "default_model.api_key_env".to_string(),
+            serde_json::Value::String(selected_api_key_env.clone()),
+        ));
+    }
+
+    for (path, value) in updates {
+        let body = daemon_json(
+            client
+                .post(format!("{base}/api/config/set"))
+                .json(&serde_json::json!({"path": path, "value": value}))
+                .send(),
+        );
+        if body.get("error").is_some() {
+            ui::error(&format!(
+                "Failed to set model: {}",
+                body["error"].as_str().unwrap_or("?")
+            ));
+            return;
+        }
+    }
+
+    if selected_provider.is_empty() {
+        ui::success(&format!(
+            "Default model set to: {}",
+            resolved_model
         ));
     } else {
-        ui::success(&format!("Default model set to: {model}"));
+        ui::success(&format!(
+            "Default model set to: {} ({})",
+            resolved_model, selected_provider
+        ));
     }
 }
 
