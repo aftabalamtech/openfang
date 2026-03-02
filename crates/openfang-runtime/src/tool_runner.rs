@@ -131,38 +131,45 @@ pub async fn execute_tool(
         }
     }
 
-    // Approval gate: check if this tool requires human approval before execution
-    if let Some(kh) = kernel {
-        if kh.requires_approval(tool_name) {
-            let agent_id_str = caller_agent_id.unwrap_or("unknown");
-            let input_str = input.to_string();
-            let summary = format!(
-                "{}: {}",
-                tool_name,
-                openfang_types::truncate_str(&input_str, 200)
-            );
-            match kh.request_approval(agent_id_str, tool_name, &summary).await {
-                Ok(true) => {
-                    debug!(tool_name, "Approval granted — proceeding with execution");
-                }
-                Ok(false) => {
-                    warn!(tool_name, "Approval denied — blocking tool execution");
-                    return ToolResult {
-                        tool_use_id: tool_use_id.to_string(),
-                        content: format!(
-                            "Execution denied: '{}' requires human approval and was denied or timed out. The operation was not performed.",
-                            tool_name
-                        ),
-                        is_error: true,
-                    };
-                }
-                Err(e) => {
-                    warn!(tool_name, error = %e, "Approval system error");
-                    return ToolResult {
-                        tool_use_id: tool_use_id.to_string(),
-                        content: format!("Approval system error: {e}"),
-                        is_error: true,
-                    };
+    // Approval gate: check if this tool requires human approval before execution.
+    // Agents with exec_policy mode = Full have pre-approved unrestricted execution;
+    // bypass the gate so that scheduled / headless runs are not blocked waiting for
+    // a human that will never respond.
+    let is_full_exec = exec_policy
+        .is_some_and(|p| p.mode == openfang_types::config::ExecSecurityMode::Full);
+    if !is_full_exec {
+        if let Some(kh) = kernel {
+            if kh.requires_approval(tool_name) {
+                let agent_id_str = caller_agent_id.unwrap_or("unknown");
+                let input_str = input.to_string();
+                let summary = format!(
+                    "{}: {}",
+                    tool_name,
+                    openfang_types::truncate_str(&input_str, 200)
+                );
+                match kh.request_approval(agent_id_str, tool_name, &summary).await {
+                    Ok(true) => {
+                        debug!(tool_name, "Approval granted — proceeding with execution");
+                    }
+                    Ok(false) => {
+                        warn!(tool_name, "Approval denied — blocking tool execution");
+                        return ToolResult {
+                            tool_use_id: tool_use_id.to_string(),
+                            content: format!(
+                                "Execution denied: '{}' requires human approval and was denied or timed out. The operation was not performed.",
+                                tool_name
+                            ),
+                            is_error: true,
+                        };
+                    }
+                    Err(e) => {
+                        warn!(tool_name, error = %e, "Approval system error");
+                        return ToolResult {
+                            tool_use_id: tool_use_id.to_string(),
+                            content: format!("Approval system error: {e}"),
+                            is_error: true,
+                        };
+                    }
                 }
             }
         }

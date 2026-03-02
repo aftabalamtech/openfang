@@ -474,7 +474,8 @@ pub struct AgentManifest {
     #[serde(default = "default_true")]
     pub generate_identity_files: bool,
     /// Per-agent exec policy override. If None, uses global exec_policy.
-    #[serde(default)]
+    /// Accepts a bare mode string ("allow", "deny", "restricted") or a full ExecPolicy struct.
+    #[serde(default, deserialize_with = "crate::serde_compat::exec_policy_override")]
     pub exec_policy: Option<crate::config::ExecPolicy>,
     /// Tool allowlist — only these tools are available (empty = all tools).
     #[serde(default, deserialize_with = "crate::serde_compat::vec_lenient")]

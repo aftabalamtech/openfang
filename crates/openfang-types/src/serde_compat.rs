@@ -303,4 +303,121 @@ mod tests {
         assert!(new.fallback_models.is_empty());
         assert!(new.skills.is_empty());
     }
+
+    #[derive(Debug, Deserialize)]
+    struct TestExecPolicy {
+        #[serde(default, deserialize_with = "exec_policy_override")]
+        exec_policy: Option<crate::config::ExecPolicy>,
+    }
+
+    // Regression test for issue #182: `exec_policy = "allow"` in agent manifest was silently
+    // deserialized as None because the field type was `Option<ExecPolicy>` (a struct), not
+    // `Option<ExecSecurityMode>` (a string). The custom deserializer now accepts both forms.
+    #[test]
+    fn exec_policy_override_string_allow() {
+        let toml = r#"exec_policy = "allow""#;
+        let v: TestExecPolicy = toml::from_str(toml).unwrap();
+        assert_eq!(
+            v.exec_policy.unwrap().mode,
+            crate::config::ExecSecurityMode::Full
+        );
+    }
+
+    #[test]
+    fn exec_policy_override_string_deny() {
+        let toml = r#"exec_policy = "deny""#;
+        let v: TestExecPolicy = toml::from_str(toml).unwrap();
+        assert_eq!(
+            v.exec_policy.unwrap().mode,
+            crate::config::ExecSecurityMode::Deny
+        );
+    }
+
+    #[test]
+    fn exec_policy_override_string_restricted() {
+        let toml = r#"exec_policy = "restricted""#;
+        let v: TestExecPolicy = toml::from_str(toml).unwrap();
+        assert_eq!(
+            v.exec_policy.unwrap().mode,
+            crate::config::ExecSecurityMode::Allowlist
+        );
+    }
+
+    #[test]
+    fn exec_policy_override_absent_gives_none() {
+        let toml = r#""#;
+        let v: TestExecPolicy = toml::from_str(toml).unwrap();
+        assert!(v.exec_policy.is_none());
+    }
+
+    #[test]
+    fn exec_policy_override_full_struct_roundtrip() {
+        let toml = r#"
+[exec_policy]
+mode = "full"
+timeout_secs = 120
+"#;
+        let v: TestExecPolicy = toml::from_str(toml).unwrap();
+        let policy = v.exec_policy.unwrap();
+        assert_eq!(policy.mode, crate::config::ExecSecurityMode::Full);
+        assert_eq!(policy.timeout_secs, 120);
+    }
+
+    #[test]
+    fn exec_policy_override_msgpack_none_roundtrip() {
+        // When an old DB blob has exec_policy = None (the broken state from before the fix),
+        // restoring it must still yield None — no regression for existing agents.
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct OldRecord {
+            name: String,
+        }
+        let old = OldRecord {
+            name: "my-agent".to_string(),
+        };
+        let blob = rmp_serde::to_vec_named(&old).unwrap();
+
+        #[derive(Debug, Deserialize)]
+        struct NewRecord {
+            name: String,
+            #[serde(default, deserialize_with = "exec_policy_override")]
+            exec_policy: Option<crate::config::ExecPolicy>,
+        }
+        let new: NewRecord = rmp_serde::from_slice(&blob).unwrap();
+        assert_eq!(new.name, "my-agent");
+        assert!(new.exec_policy.is_none());
+    }
+}
+
+/// Deserialize `exec_policy` in an agent manifest.
+///
+/// Accepts either:
+/// - A bare `ExecSecurityMode` string: `"allow"`, `"deny"`, `"restricted"`, etc.
+/// - A full `ExecPolicy` struct: `{ mode = "allow", timeout_secs = 60, ... }`
+/// - Absent / null → `None` (fall through to the global exec_policy)
+///
+/// This resolves the type mismatch where manifest authors write `exec_policy = "allow"`
+/// (a string) but the field was typed as `Option<ExecPolicy>` (a struct), causing serde
+/// to silently fall back to `None` and ignore the author's intent.
+pub fn exec_policy_override<'de, D>(
+    deserializer: D,
+) -> Result<Option<crate::config::ExecPolicy>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum ExecPolicyInput {
+        Mode(crate::config::ExecSecurityMode),
+        Full(crate::config::ExecPolicy),
+    }
+
+    let opt = Option::<ExecPolicyInput>::deserialize(deserializer)?;
+    Ok(match opt {
+        None => None,
+        Some(ExecPolicyInput::Mode(mode)) => Some(crate::config::ExecPolicy {
+            mode,
+            ..Default::default()
+        }),
+        Some(ExecPolicyInput::Full(policy)) => Some(policy),
+    })
 }
