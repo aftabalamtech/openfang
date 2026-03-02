@@ -16,8 +16,8 @@ use openfang_types::model_catalog::{
     AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, COHERE_BASE_URL, DEEPSEEK_BASE_URL,
     FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL, LMSTUDIO_BASE_URL,
     MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL, OPENAI_BASE_URL,
-    OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
-    REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
+    OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL, REPLICATE_BASE_URL,
+    SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, VOLCENGINE_CODING_BASE_URL, XAI_BASE_URL,
     ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
 };
 use std::sync::Arc;
@@ -166,6 +166,11 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
         "zhipu_coding" | "codegeex" => Some(ProviderDefaults {
             base_url: ZHIPU_CODING_BASE_URL,
             api_key_env: "ZHIPU_API_KEY",
+            key_required: true,
+        }),
+        "volcengine_coding" => Some(ProviderDefaults {
+            base_url: VOLCENGINE_CODING_BASE_URL,
+            api_key_env: "VOLCENGINE_API_KEY",
             key_required: true,
         }),
         "qianfan" | "baidu" => Some(ProviderDefaults {
@@ -359,6 +364,7 @@ pub fn known_providers() -> &'static [&'static str] {
         "minimax",
         "zhipu",
         "zhipu_coding",
+        "volcengine_coding",
         "qianfan",
         "codex",
         "claude-code",

@@ -9,8 +9,8 @@ use openfang_types::model_catalog::{
     GEMINI_BASE_URL, GITHUB_COPILOT_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL,
     LMSTUDIO_BASE_URL, MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL,
     OPENAI_BASE_URL, OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
-    REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
-    ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
+    REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL,
+    VOLCENGINE_CODING_BASE_URL, XAI_BASE_URL, ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
 };
 use std::collections::HashMap;
 
@@ -584,6 +584,15 @@ fn builtin_providers() -> Vec<ProviderInfo> {
             model_count: 0,
         },
         ProviderInfo {
+            id: "volcengine_coding".into(),
+            display_name: "VolcEngine Coding".into(),
+            api_key_env: "VOLCENGINE_API_KEY".into(),
+            base_url: VOLCENGINE_CODING_BASE_URL.into(),
+            key_required: true,
+            auth_status: AuthStatus::Missing,
+            model_count: 0,
+        },
+        ProviderInfo {
             id: "moonshot".into(),
             display_name: "Moonshot (Kimi)".into(),
             api_key_env: "MOONSHOT_API_KEY".into(),
@@ -683,6 +692,7 @@ fn builtin_aliases() -> HashMap<String, String> {
         // Chinese model aliases
         ("qwen", "qwen-plus"),
         ("glm", "glm-4-plus"),
+        ("doubao", "ark-code-latest"),
         ("ernie", "ernie-4.5-8k"),
         ("kimi", "moonshot-v1-128k"),
         ("minimax", "MiniMax-M2.5"),
@@ -2604,6 +2614,107 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             aliases: vec!["codegeex".into()],
         },
         // ══════════════════════════════════════════════════════════════
+        // VolcEngine Coding Plan
+        // ══════════════════════════════════════════════════════════════
+        ModelCatalogEntry {
+            id: "ark-code-latest".into(),
+            display_name: "Ark Coding Plan".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 256_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "doubao-seed-2.0-code".into(),
+            display_name: "Doubao Seed 2.0 Code".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Fast,
+            context_window: 256_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "doubao-seed-code".into(),
+            display_name: "Doubao Seed Code".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Fast,
+            context_window: 256_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "glm-4.7".into(),
+            display_name: "GLM 4.7".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 200_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "deepseek-v3.2".into(),
+            display_name: "DeepSeek V3.2".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 256_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "kimi-k2-thinking".into(),
+            display_name: "Kimi K2 Thinking".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 256_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        ModelCatalogEntry {
+            id: "kimi-k2.5".into(),
+            display_name: "kimi-k2.5".into(),
+            provider: "volcengine_coding".into(),
+            tier: ModelTier::Smart,
+            context_window: 256_000,
+            max_output_tokens: 4_096,
+            input_cost_per_m: 0.00,
+            output_cost_per_m: 0.00,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![],
+        },
+        // ══════════════════════════════════════════════════════════════
         // Moonshot / Kimi (3)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
@@ -2935,10 +3046,7 @@ mod tests {
     #[test]
     fn test_resolve_alias() {
         let catalog = ModelCatalog::new();
-        assert_eq!(
-            catalog.resolve_alias("sonnet"),
-            Some("claude-sonnet-4-6")
-        );
+        assert_eq!(catalog.resolve_alias("sonnet"), Some("claude-sonnet-4-6"));
         assert_eq!(
             catalog.resolve_alias("haiku"),
             Some("claude-haiku-4-5-20251001")
@@ -3121,6 +3229,7 @@ mod tests {
         assert!(catalog.get_provider("minimax").is_some());
         assert!(catalog.get_provider("zhipu").is_some());
         assert!(catalog.get_provider("zhipu_coding").is_some());
+        assert!(catalog.get_provider("volcengine_coding").is_some());
         assert!(catalog.get_provider("moonshot").is_some());
         assert!(catalog.get_provider("qianfan").is_some());
         assert!(catalog.get_provider("bedrock").is_some());
@@ -3131,6 +3240,7 @@ mod tests {
         let catalog = ModelCatalog::new();
         assert!(catalog.find_model("kimi").is_some());
         assert!(catalog.find_model("glm").is_some());
+        assert!(catalog.find_model("doubao").is_some());
         assert!(catalog.find_model("codegeex").is_some());
         assert!(catalog.find_model("ernie").is_some());
         assert!(catalog.find_model("minimax").is_some());

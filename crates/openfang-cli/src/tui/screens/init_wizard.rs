@@ -101,6 +101,14 @@ const PROVIDERS: &[ProviderInfo] = &[
         hint: "",
     },
     ProviderInfo {
+        name: "volcengine_coding",
+        display: "Volcengine Coding",
+        env_var: "VOLCENGINE_API_KEY",
+        default_model: "ark-code-latest",
+        needs_key: true,
+        hint: "",
+    },
+    ProviderInfo {
         name: "ollama",
         display: "Ollama",
         env_var: "OLLAMA_API_KEY",
@@ -1594,7 +1602,7 @@ fn draw_provider(f: &mut Frame, area: Rect, state: &mut State) {
             } else {
                 Span::styled("  ", Style::default())
             };
-            let name_span = Span::raw(format!("{:<14}", p.display));
+            let name_span = Span::raw(format!("{:<20}", p.display));
             let hint_text = if detected {
                 format!("{} detected", p.env_var)
             } else if !p.needs_key {
