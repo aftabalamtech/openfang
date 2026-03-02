@@ -1726,6 +1726,10 @@ pub struct EmailConfig {
     pub folders: Vec<String>,
     /// Only process emails from these senders (empty = all).
     pub allowed_senders: Vec<String>,
+    /// Read-only mode — process incoming emails but never send replies.
+    /// Useful for newsletter ingestion where auto-replies are unwanted.
+    #[serde(default)]
+    pub read_only: bool,
     /// Default agent name to route messages to.
     pub default_agent: Option<String>,
     /// Per-channel behavior overrides.
@@ -1745,6 +1749,7 @@ impl Default for EmailConfig {
             poll_interval_secs: 30,
             folders: vec!["INBOX".to_string()],
             allowed_senders: vec![],
+            read_only: false,
             default_agent: None,
             overrides: ChannelOverrides::default(),
         }

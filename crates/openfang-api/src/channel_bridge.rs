@@ -1124,6 +1124,7 @@ pub async fn start_channel_bridge_with_config(
                 em_config.poll_interval_secs,
                 em_config.folders.clone(),
                 em_config.allowed_senders.clone(),
+                em_config.read_only,
             ));
             adapters.push((adapter, em_config.default_agent.clone()));
         }

@@ -47,6 +47,8 @@ pub struct EmailAdapter {
     folders: Vec<String>,
     /// Only process emails from these senders (empty = all).
     allowed_senders: Vec<String>,
+    /// Read-only mode — never send replies via SMTP.
+    read_only: bool,
     /// Shutdown signal.
     shutdown_tx: Arc<watch::Sender<bool>>,
     shutdown_rx: watch::Receiver<bool>,
@@ -67,6 +69,7 @@ impl EmailAdapter {
         poll_interval_secs: u64,
         folders: Vec<String>,
         allowed_senders: Vec<String>,
+        read_only: bool,
     ) -> Self {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         Self {
@@ -83,6 +86,7 @@ impl EmailAdapter {
                 folders
             },
             allowed_senders,
+            read_only,
             shutdown_tx: Arc::new(shutdown_tx),
             shutdown_rx,
             reply_ctx: Arc::new(DashMap::new()),
@@ -405,6 +409,10 @@ impl ChannelAdapter for EmailAdapter {
         user: &ChannelUser,
         content: ChannelContent,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.read_only {
+            debug!("Email adapter in read-only mode, skipping reply to {}", user.platform_id);
+            return Ok(());
+        }
         match content {
             ChannelContent::Text(text) => {
                 // Parse recipient address
@@ -499,6 +507,7 @@ mod tests {
             30,
             vec![],
             vec![],
+            false,
         );
         assert_eq!(adapter.name(), "email");
         assert_eq!(adapter.folders, vec!["INBOX".to_string()]);
@@ -516,6 +525,7 @@ mod tests {
             30,
             vec![],
             vec!["boss@company.com".to_string()],
+            false,
         );
         assert!(adapter.is_allowed_sender("boss@company.com"));
         assert!(!adapter.is_allowed_sender("random@other.com"));
@@ -530,6 +540,7 @@ mod tests {
             30,
             vec![],
             vec![],
+            false,
         );
         assert!(open.is_allowed_sender("anyone@anywhere.com"));
     }
