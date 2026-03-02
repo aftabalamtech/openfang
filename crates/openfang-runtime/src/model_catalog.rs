@@ -115,6 +115,19 @@ impl ModelCatalog {
             .collect()
     }
 
+    /// Return the default model ID for a provider (first model in catalog order).
+    pub fn default_model_for_provider(&self, provider: &str) -> Option<String> {
+        // Check aliases first — e.g. "minimax" alias resolves to "MiniMax-M2.5"
+        if let Some(model_id) = self.aliases.get(provider) {
+            return Some(model_id.clone());
+        }
+        // Fall back to the first model registered for this provider
+        self.models
+            .iter()
+            .find(|m| m.provider == provider)
+            .map(|m| m.id.clone())
+    }
+
     /// List models that are available (from configured providers only).
     pub fn available_models(&self) -> Vec<&ModelCatalogEntry> {
         let configured: Vec<&str> = self

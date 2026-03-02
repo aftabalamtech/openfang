@@ -213,7 +213,11 @@ pub async fn execute_tool(
                 {
                     return ToolResult {
                         tool_use_id: tool_use_id.to_string(),
-                        content: format!("Exec policy denied: {reason}"),
+                        content: format!(
+                            "shell_exec blocked: {reason}. Current exec_policy.mode = '{:?}'. \
+                             To allow shell commands, set exec_policy.mode = 'full' in the agent manifest or config.toml.",
+                            policy.mode
+                        ),
                         is_error: true,
                     };
                 }
@@ -330,7 +334,7 @@ pub async fn execute_tool(
                     crate::browser::tool_browser_navigate(input, mgr, aid).await
                 }
                 None => Err(
-                    "Browser tools not available. Ensure Python and playwright are installed."
+                    "Browser tools not available. Ensure Chrome/Chromium is installed."
                         .to_string(),
                 ),
             }
@@ -340,35 +344,63 @@ pub async fn execute_tool(
                 let aid = caller_agent_id.unwrap_or("default");
                 crate::browser::tool_browser_click(input, mgr, aid).await
             }
-            None => Err("Browser tools not available.".to_string()),
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
         },
         "browser_type" => match browser_ctx {
             Some(mgr) => {
                 let aid = caller_agent_id.unwrap_or("default");
                 crate::browser::tool_browser_type(input, mgr, aid).await
             }
-            None => Err("Browser tools not available.".to_string()),
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
         },
         "browser_screenshot" => match browser_ctx {
             Some(mgr) => {
                 let aid = caller_agent_id.unwrap_or("default");
                 crate::browser::tool_browser_screenshot(input, mgr, aid).await
             }
-            None => Err("Browser tools not available.".to_string()),
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
         },
         "browser_read_page" => match browser_ctx {
             Some(mgr) => {
                 let aid = caller_agent_id.unwrap_or("default");
                 crate::browser::tool_browser_read_page(input, mgr, aid).await
             }
-            None => Err("Browser tools not available.".to_string()),
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
         },
         "browser_close" => match browser_ctx {
             Some(mgr) => {
                 let aid = caller_agent_id.unwrap_or("default");
                 crate::browser::tool_browser_close(input, mgr, aid).await
             }
-            None => Err("Browser tools not available.".to_string()),
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
+        },
+        "browser_scroll" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_scroll(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
+        },
+        "browser_wait" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_wait(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
+        },
+        "browser_run_js" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_run_js(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
+        },
+        "browser_back" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_back(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available. Ensure Chrome/Chromium is installed.".to_string()),
         },
 
         // Canvas / A2UI tool
@@ -823,6 +855,48 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "browser_close".to_string(),
             description: "Close the browser session. The browser will also auto-close when the agent loop ends.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        ToolDefinition {
+            name: "browser_scroll".to_string(),
+            description: "Scroll the browser page. Use this to see content below the fold or navigate long pages.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "description": "Scroll direction: 'up', 'down', 'left', 'right' (default: 'down')" },
+                    "amount": { "type": "integer", "description": "Pixels to scroll (default: 600)" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "browser_wait".to_string(),
+            description: "Wait for a CSS selector to appear on the page. Useful for dynamic content that loads asynchronously.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "selector": { "type": "string", "description": "CSS selector to wait for" },
+                    "timeout_ms": { "type": "integer", "description": "Max wait time in milliseconds (default: 5000, max: 30000)" }
+                },
+                "required": ["selector"]
+            }),
+        },
+        ToolDefinition {
+            name: "browser_run_js".to_string(),
+            description: "Run JavaScript on the current browser page and return the result. For advanced interactions that other browser tools cannot handle.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "expression": { "type": "string", "description": "JavaScript expression to run in the page context" }
+                },
+                "required": ["expression"]
+            }),
+        },
+        ToolDefinition {
+            name: "browser_back".to_string(),
+            description: "Go back to the previous page in browser history.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -3018,6 +3092,10 @@ mod tests {
         assert!(names.contains(&"browser_screenshot"));
         assert!(names.contains(&"browser_read_page"));
         assert!(names.contains(&"browser_close"));
+        assert!(names.contains(&"browser_scroll"));
+        assert!(names.contains(&"browser_wait"));
+        assert!(names.contains(&"browser_run_js"));
+        assert!(names.contains(&"browser_back"));
         // 3 media/image generation tools
         assert!(names.contains(&"media_describe"));
         assert!(names.contains(&"media_transcribe"));

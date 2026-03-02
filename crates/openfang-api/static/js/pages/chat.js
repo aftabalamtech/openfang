@@ -29,6 +29,11 @@ function chatPage() {
     _audioChunks: [],
     recordingTime: 0,
     _recordingTimer: null,
+    // Model autocomplete state
+    showModelPicker: false,
+    modelPickerList: [],
+    modelPickerFilter: '',
+    modelPickerIdx: 0,
     slashCommands: [
       { cmd: '/help', desc: 'Show available commands' },
       { cmd: '/agents', desc: 'Switch to Agents page' },
@@ -126,16 +131,45 @@ function chatPage() {
         }
       });
 
-      // Watch for slash commands
+      // Watch for slash commands + model autocomplete
       this.$watch('inputText', function(val) {
-        if (val.startsWith('/')) {
+        var modelMatch = val.match(/^\/model\s+(.*)$/i);
+        if (modelMatch) {
+          self.showSlashMenu = false;
+          self.modelPickerFilter = modelMatch[1].toLowerCase();
+          if (!self.modelPickerList.length) {
+            OpenFangAPI.get('/api/models').then(function(data) {
+              self.modelPickerList = (data.models || []).filter(function(m) { return m.available; });
+              self.showModelPicker = true;
+              self.modelPickerIdx = 0;
+            }).catch(function() {});
+          } else {
+            self.showModelPicker = true;
+          }
+        } else if (val.startsWith('/')) {
+          self.showModelPicker = false;
           self.slashFilter = val.slice(1).toLowerCase();
           self.showSlashMenu = true;
           self.slashIdx = 0;
         } else {
           self.showSlashMenu = false;
+          self.showModelPicker = false;
         }
       });
+    },
+
+    get filteredModelPicker() {
+      if (!this.modelPickerFilter) return this.modelPickerList.slice(0, 15);
+      var f = this.modelPickerFilter;
+      return this.modelPickerList.filter(function(m) {
+        return m.id.toLowerCase().indexOf(f) !== -1 || (m.display_name || '').toLowerCase().indexOf(f) !== -1 || m.provider.toLowerCase().indexOf(f) !== -1;
+      }).slice(0, 15);
+    },
+
+    pickModel(modelId) {
+      this.showModelPicker = false;
+      this.inputText = '/model ' + modelId;
+      this.sendMessage();
     },
 
     // Fetch dynamic slash commands from server
