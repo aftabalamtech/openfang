@@ -654,6 +654,34 @@ pub async fn run_workflow(
     }
 }
 
+/// DELETE /api/workflows/:id — Remove a workflow.
+pub async fn delete_workflow(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let workflow_id = WorkflowId(match id.parse() {
+        Ok(u) => u,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid workflow ID"})),
+            );
+        }
+    });
+
+    if state.kernel.workflows.remove_workflow(workflow_id).await {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"deleted": true, "id": id})),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Workflow not found"})),
+        )
+    }
+}
+
 /// GET /api/workflows/:id/runs — List runs for a workflow.
 pub async fn list_workflow_runs(
     State(state): State<Arc<AppState>>,

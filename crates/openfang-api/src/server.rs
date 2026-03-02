@@ -306,6 +306,10 @@ pub async fn build_router(
             axum::routing::get(routes::list_workflows).post(routes::create_workflow),
         )
         .route(
+            "/api/workflows/{id}",
+            axum::routing::delete(routes::delete_workflow),
+        )
+        .route(
             "/api/workflows/{id}/run",
             axum::routing::post(routes::run_workflow),
         )

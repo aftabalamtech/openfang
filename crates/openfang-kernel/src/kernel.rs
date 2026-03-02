@@ -849,6 +849,7 @@ impl OpenFangKernel {
         let initial_bindings = config.bindings.clone();
         let initial_broadcast = config.broadcast.clone();
         let auto_reply_engine = crate::auto_reply::AutoReplyEngine::new(config.auto_reply.clone());
+        let workflows_path = config.home_dir.join("workflows.json");
 
         let kernel = Self {
             config,
@@ -858,7 +859,7 @@ impl OpenFangKernel {
             scheduler: AgentScheduler::new(),
             memory: memory.clone(),
             supervisor,
-            workflows: WorkflowEngine::new(),
+            workflows: WorkflowEngine::with_persistence(workflows_path),
             triggers: TriggerEngine::new(),
             background,
             audit_log: Arc::new(AuditLog::new()),
@@ -904,6 +905,9 @@ impl OpenFangKernel {
 
         // Initialize credential vault (decrypt secrets, migrate from secrets.env)
         kernel.init_vault();
+
+        // Load persisted workflows from ~/.openfang/workflows.json
+        kernel.workflows.load_persisted_sync();
 
         // Restore persisted agents from SQLite
         match kernel.memory.load_all_agents() {
