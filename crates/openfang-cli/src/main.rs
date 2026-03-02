@@ -749,17 +749,17 @@ enum SystemCommands {
     },
 }
 
-fn init_tracing_stderr() {
+fn init_tracing_stderr(log_level: &str) {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_level)),
         )
         .init();
 }
 
 /// Redirect tracing to a log file so it doesn't corrupt the ratatui TUI.
-fn init_tracing_file() {
+fn init_tracing_file(log_level: &str) {
     let log_dir = dirs::home_dir()
         .map(|h| h.join(".openfang"))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -771,7 +771,7 @@ fn init_tracing_file() {
             tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_level)),
                 )
                 .with_writer(std::sync::Mutex::new(file))
                 .with_ansi(false)
@@ -788,10 +788,16 @@ fn init_tracing_file() {
 }
 
 fn main() {
-    // Load ~/.openfang/.env into process environment (system env takes priority).
-    dotenv::load_dotenv();
-
     let cli = Cli::parse();
+
+    // Load config to get log_level setting and home_dir
+    let config = openfang_kernel::config::load_config(cli.config.as_deref());
+    let log_level = &config.log_level;
+    
+    // Load .env and secrets.env from config-specified home_dir
+    dotenv::load_dotenv_from_dir(&config.home_dir);
+    // Also load from default location as fallback
+    dotenv::load_dotenv();
 
     // Determine if this invocation launches a ratatui TUI.
     // TUI modes must NOT install the Ctrl+C handler (it calls process::exit
@@ -807,12 +813,12 @@ fn main() {
         );
 
     if is_tui_mode {
-        init_tracing_file();
+        init_tracing_file(log_level);
     } else {
         // CLI subcommands: install Ctrl+C handler for clean interrupt of
         // blocking read_line calls, and trace to stderr.
         install_ctrlc_handler();
-        init_tracing_stderr();
+        init_tracing_stderr(log_level);
     }
 
     match cli.command {

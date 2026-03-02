@@ -11,6 +11,18 @@ pub fn env_file_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".openfang").join(".env"))
 }
 
+/// Load `.env` and `secrets.env` from the given directory into `std::env`.
+///
+/// System env vars take priority — existing vars are NOT overridden.
+/// `secrets.env` is loaded second so `.env` values take priority over secrets
+/// (but both yield to system env vars).
+/// Silently does nothing if the files don't exist.
+pub fn load_dotenv_from_dir(dir: &std::path::Path) {
+    load_env_file(Some(dir.join(".env")));
+    // Also load secrets.env (written by dashboard "Set API Key" button)
+    load_env_file(Some(dir.join("secrets.env")));
+}
+
 /// Load `~/.openfang/.env` and `~/.openfang/secrets.env` into `std::env`.
 ///
 /// System env vars take priority — existing vars are NOT overridden.
@@ -18,12 +30,15 @@ pub fn env_file_path() -> Option<PathBuf> {
 /// (but both yield to system env vars).
 /// Silently does nothing if the files don't exist.
 pub fn load_dotenv() {
-    load_env_file(env_file_path());
-    // Also load secrets.env (written by dashboard "Set API Key" button)
-    load_env_file(secrets_env_path());
+    if let Some(path) = env_file_path() {
+        if let Some(dir) = path.parent() {
+            load_dotenv_from_dir(dir);
+        }
+    }
 }
 
 /// Return the path to `~/.openfang/secrets.env`.
+#[allow(dead_code)]
 pub fn secrets_env_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".openfang").join("secrets.env"))
 }
