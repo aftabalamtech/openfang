@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use dashmap::DashMap;
+use openfang_kernel::error::KernelError;
 use openfang_kernel::triggers::{TriggerId, TriggerPattern};
 use openfang_kernel::workflow::{
     ErrorMode, StepAgent, StepMode, Workflow, WorkflowId, WorkflowStep,
@@ -450,71 +451,6 @@ pub async fn kill_agent(
     }
 }
 
-/// DELETE /api/agents/:id/history — Clear agent conversation history.
-///
-/// Optional query parameters:
-/// - `keep_last` — Keep N most recent messages (default: 0, meaning delete all)
-pub async fn clear_agent_history(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let agent_id: AgentId = match id.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "Invalid agent ID"})),
-            );
-        }
-    };
-
-    // Check if agent exists
-    if state.kernel.registry.get(agent_id).is_none() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Agent not found"})),
-        );
-    }
-
-    // Parse optional keep_last parameter
-    let keep_last: usize = params
-        .get("keep_last")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-
-    // If keep_last is specified and > 0, we need partial deletion
-    // For now, we implement full deletion; partial can be added later
-    if keep_last > 0 {
-        // TODO: Implement partial session truncation
-        // This would require loading the session, truncating messages, and saving back
-        tracing::info!(
-            "Partial history clear requested for agent {id} (keep_last={keep_last}), falling back to full clear"
-        );
-    }
-
-    // Delete all sessions for this agent
-    match state.kernel.memory.delete_agent_sessions(agent_id) {
-        Ok(()) => {
-            tracing::info!("Cleared conversation history for agent {id}");
-            // Audit log the action
-            state.kernel.audit_log.record(
-                "system",
-                openfang_runtime::audit::AuditAction::ConfigChange,
-                "cleared agent conversation history",
-                format!("agent_id: {id}, keep_last: {keep_last}"),
-            );
-            (StatusCode::NO_CONTENT, Json(serde_json::json!({})))
-        }
-        Err(e) => {
-            tracing::warn!("Failed to clear history for agent {id}: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to clear conversation history"})),
-            )
-        }
-    }
-}
 
 /// GET /api/status — Kernel status.
 pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -5766,9 +5702,15 @@ pub async fn clear_agent_history(
     };
     match state.kernel.clear_agent_history(agent_id) {
         Ok(()) => (
-            StatusCode::OK,
-            Json(serde_json::json!({"status": "ok", "message": "All history cleared"})),
+            StatusCode::NO_CONTENT,
+            Json(serde_json::json!({})),
         ),
+        Err(KernelError::OpenFang(openfang_types::error::OpenFangError::AgentNotFound(_))) => {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent not found"})),
+            )
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("{e}")})),
