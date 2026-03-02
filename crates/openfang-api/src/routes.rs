@@ -2631,6 +2631,13 @@ pub async fn health_detail(State(state): State<Arc<AppState>>) -> impl IntoRespo
     let config_warnings = state.kernel.config.validate();
     let status = if db_ok { "ok" } else { "degraded" };
 
+    let wa_health = state
+        .kernel
+        .whatsapp_gateway_health
+        .read()
+        .ok()
+        .and_then(|g| g.clone());
+
     Json(serde_json::json!({
         "status": status,
         "version": env!("CARGO_PKG_VERSION"),
@@ -2640,7 +2647,41 @@ pub async fn health_detail(State(state): State<Arc<AppState>>) -> impl IntoRespo
         "agent_count": state.kernel.registry.count(),
         "database": if db_ok { "connected" } else { "error" },
         "config_warnings": config_warnings,
+        "whatsapp_gateway": wa_health.map(|h| serde_json::json!({
+            "process_alive": h.process_alive,
+            "ws_connected": h.ws_connected,
+            "last_ok": h.last_ok,
+            "last_error": h.last_error,
+            "reconnect_attempts": h.reconnect_attempts,
+        })),
     }))
+}
+
+/// GET /api/channels/whatsapp/health — WhatsApp gateway health status.
+pub async fn whatsapp_gateway_health(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let health = state
+        .kernel
+        .whatsapp_gateway_health
+        .read()
+        .ok()
+        .and_then(|g| g.clone());
+
+    match health {
+        Some(h) => Json(serde_json::json!({
+            "available": true,
+            "process_alive": h.process_alive,
+            "ws_connected": h.ws_connected,
+            "last_ok": h.last_ok,
+            "last_error": h.last_error,
+            "reconnect_attempts": h.reconnect_attempts,
+        })),
+        None => Json(serde_json::json!({
+            "available": false,
+            "message": "WhatsApp gateway not configured or health monitor not started yet",
+        })),
+    }
 }
 
 // ---------------------------------------------------------------------------

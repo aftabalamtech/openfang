@@ -129,6 +129,8 @@ pub struct OpenFangKernel {
     pub booted_at: std::time::Instant,
     /// WhatsApp Web gateway child process PID (for shutdown cleanup).
     pub whatsapp_gateway_pid: Arc<std::sync::Mutex<Option<u32>>>,
+    /// WhatsApp gateway health state (updated by periodic health monitor loop).
+    pub whatsapp_gateway_health: Arc<std::sync::RwLock<Option<crate::whatsapp_gateway::WhatsAppGatewayHealth>>>,
     /// Channel adapters registered at bridge startup (for proactive `channel_send` tool).
     pub channel_adapters: dashmap::DashMap<String, Arc<dyn openfang_channels::types::ChannelAdapter>>,
     /// Hot-reloadable default model override (set via config hot-reload, read at agent spawn).
@@ -891,6 +893,7 @@ impl OpenFangKernel {
             peer_node: OnceLock::new(),
             booted_at: std::time::Instant::now(),
             whatsapp_gateway_pid: Arc::new(std::sync::Mutex::new(None)),
+            whatsapp_gateway_health: Arc::new(std::sync::RwLock::new(None)),
             channel_adapters: dashmap::DashMap::new(),
             default_model_override: std::sync::RwLock::new(None),
             self_handle: OnceLock::new(),
@@ -3515,6 +3518,12 @@ impl OpenFangKernel {
             let kernel = Arc::clone(self);
             tokio::spawn(async move {
                 crate::whatsapp_gateway::start_whatsapp_gateway(&kernel).await;
+            });
+
+            // Start WhatsApp gateway health monitor (polls /health, triggers reconnect)
+            let kernel2 = Arc::clone(self);
+            tokio::spawn(async move {
+                crate::whatsapp_gateway::run_whatsapp_health_loop(&kernel2).await;
             });
         }
     }

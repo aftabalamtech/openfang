@@ -16,6 +16,10 @@ const ALLOWED_NUMBERS = (process.env.WHATSAPP_ALLOWED_USERS || '')
   .filter(Boolean);
 const MAX_MESSAGE_LENGTH = 4096;
 
+// Heartbeat watchdog — detects stale connections after system sleep/wake
+const HEARTBEAT_INTERVAL_MS = 30_000;  // Check every 30 seconds
+const HEARTBEAT_STALE_MS = 90_000;     // Consider stale if no Baileys activity for 90s
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -25,6 +29,84 @@ let qrDataUrl = '';       // latest QR code as data:image/png;base64,...
 let connStatus = 'disconnected'; // disconnected | qr_ready | connected
 let qrExpired = false;
 let statusMessage = 'Not started';
+let lastActivityAt = 0;       // timestamp of last known good Baileys activity
+let heartbeatTimer = null;    // setInterval handle for heartbeat watchdog
+let reconnecting = false;     // guard against overlapping reconnect attempts
+const startedAt = Date.now(); // process start time
+
+// ---------------------------------------------------------------------------
+// Heartbeat watchdog — self-heals dead WebSocket after sleep/wake
+// ---------------------------------------------------------------------------
+function touchActivity() {
+  lastActivityAt = Date.now();
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  lastActivityAt = Date.now();
+
+  heartbeatTimer = setInterval(async () => {
+    if (connStatus !== 'connected' || reconnecting) return;
+
+    const silentMs = Date.now() - lastActivityAt;
+    if (silentMs > HEARTBEAT_STALE_MS) {
+      console.log(`[gateway] Heartbeat: no activity for ${Math.round(silentMs / 1000)}s, probing...`);
+      try {
+        // Check if Baileys WebSocket is truly alive
+        const wsOk = sock && sock.ws && sock.ws.readyState === 1; // WebSocket.OPEN
+        const userOk = sock && sock.user;
+        if (!wsOk || !userOk) {
+          console.log(`[gateway] Heartbeat: dead socket (ws=${wsOk}, user=${userOk}), reconnecting`);
+          await triggerReconnect();
+          return;
+        }
+        // Socket looks alive — reset timer
+        touchActivity();
+      } catch (err) {
+        console.log(`[gateway] Heartbeat probe error: ${err.message}, reconnecting`);
+        await triggerReconnect();
+      }
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+async function triggerReconnect() {
+  if (reconnecting) return;
+  reconnecting = true;
+
+  console.log('[gateway] Self-healing: initiating reconnect...');
+  connStatus = 'disconnected';
+  statusMessage = 'Reconnecting (auto-heal)...';
+
+  // Clean up existing socket
+  if (sock) {
+    try { sock.end(); } catch {}
+    sock = null;
+  }
+  stopHeartbeat();
+
+  // Brief delay then reconnect
+  await new Promise(r => setTimeout(r, 3000));
+  try {
+    await startConnection();
+  } catch (err) {
+    console.error('[gateway] Self-heal reconnect failed:', err.message);
+    // Retry after backoff
+    setTimeout(() => {
+      reconnecting = false;
+      triggerReconnect();
+    }, 10_000);
+    return;
+  }
+  reconnecting = false;
+}
 
 // ---------------------------------------------------------------------------
 // Baileys connection
@@ -69,10 +151,14 @@ async function startConnection() {
   });
 
   // Save credentials whenever they update
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', () => {
+    touchActivity();
+    saveCreds();
+  });
 
   // Connection state changes (QR code, connected, disconnected)
   sock.ev.on('connection.update', async (update) => {
+    touchActivity();
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
@@ -89,6 +175,7 @@ async function startConnection() {
     }
 
     if (connection === 'close') {
+      stopHeartbeat();
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const reason = lastDisconnect?.error?.output?.payload?.message || 'unknown';
       console.log(`[gateway] Connection closed: ${reason} (${statusCode})`);
@@ -119,12 +206,15 @@ async function startConnection() {
       qrExpired = false;
       qrDataUrl = '';
       statusMessage = 'Connected to WhatsApp';
+      reconnecting = false;
       console.log('[gateway] Connected to WhatsApp!');
+      startHeartbeat();
     }
   });
 
   // Incoming messages → forward to OpenFang
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    touchActivity();
     if (type !== 'notify') return;
 
     for (const msg of messages) {
@@ -390,12 +480,31 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, 200, { success: true, message: 'Sent' });
     }
 
-    // GET /health — health check
+    // GET /health — health check (enhanced with diagnostics)
     if (req.method === 'GET' && path === '/health') {
       return jsonResponse(res, 200, {
         status: 'ok',
         connected: connStatus === 'connected',
+        conn_status: connStatus,
         session_id: sessionId || null,
+        has_socket: sock !== null,
+        last_activity_ms: lastActivityAt ? (Date.now() - lastActivityAt) : null,
+        uptime_ms: Date.now() - startedAt,
+      });
+    }
+
+    // POST /health/reconnect — kernel-triggered reconnect
+    if (req.method === 'POST' && path === '/health/reconnect') {
+      if (connStatus === 'connected' && sock) {
+        return jsonResponse(res, 200, {
+          reconnected: false,
+          reason: 'already_connected',
+        });
+      }
+      triggerReconnect();
+      return jsonResponse(res, 200, {
+        reconnected: true,
+        message: 'Reconnect initiated',
       });
     }
 
@@ -417,11 +526,13 @@ server.listen(PORT, '127.0.0.1', () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n[gateway] Shutting down...');
+  stopHeartbeat();
   if (sock) sock.end();
   server.close(() => process.exit(0));
 });
 
 process.on('SIGTERM', () => {
+  stopHeartbeat();
   if (sock) sock.end();
   server.close(() => process.exit(0));
 });

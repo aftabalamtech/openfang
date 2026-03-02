@@ -119,6 +119,10 @@ pub async fn build_router(
             "/api/health/detail",
             axum::routing::get(routes::health_detail),
         )
+        .route(
+            "/api/channels/whatsapp/health",
+            axum::routing::get(routes::whatsapp_gateway_health),
+        )
         .route("/api/status", axum::routing::get(routes::status))
         .route("/api/version", axum::routing::get(routes::version))
         .route(
