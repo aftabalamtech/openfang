@@ -281,8 +281,8 @@ pub struct BrowserConfig {
     pub idle_timeout_secs: u64,
     /// Maximum concurrent browser sessions.
     pub max_sessions: usize,
-    /// Python executable path (e.g., "python3" on Unix, "python" on Windows).
-    pub python_path: String,
+    /// Path to Chromium/Chrome binary. Auto-detected if None.
+    pub chromium_path: Option<String>,
 }
 
 impl Default for BrowserConfig {
@@ -294,11 +294,7 @@ impl Default for BrowserConfig {
             timeout_secs: 30,
             idle_timeout_secs: 300,
             max_sessions: 5,
-            python_path: if cfg!(windows) {
-                "python".to_string()
-            } else {
-                "python3".to_string()
-            },
+            chromium_path: None,
         }
     }
 }
