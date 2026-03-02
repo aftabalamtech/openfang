@@ -127,7 +127,19 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
             return Ok(vec![]);
         }
 
-        let url = format!("{}/embeddings", self.base_url);
+        // Ollama uses different API path structure for embeddings
+        let url = if self.base_url.contains("11434") || self.base_url.contains("ollama") {
+            // For Ollama: use /api/embeddings instead of /v1/embeddings
+            let root = self.base_url.trim_end_matches("/v1").trim_end_matches('/');
+            if root.ends_with("/api") {
+                format!("{}/embeddings", root)
+            } else {
+                format!("{}/api/embeddings", root)
+            }
+        } else {
+            // For other OpenAI-compatible providers
+            format!("{}/embeddings", self.base_url)
+        };
         let body = EmbedRequest {
             model: &self.model,
             input: texts,
@@ -152,13 +164,32 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
             });
         }
 
-        let data: EmbedResponse = resp
-            .json()
-            .await
-            .map_err(|e| EmbeddingError::Parse(e.to_string()))?;
-
-        // Update dimensions from actual response if available
-        let embeddings: Vec<Vec<f32>> = data.data.into_iter().map(|d| d.embedding).collect();
+        // Handle both OpenAI format ({"data": [{"embedding": [...]}]) and Ollama format ({"embedding": [...]})
+        let embeddings: Vec<Vec<f32>> = match resp.json::<serde_json::Value>().await {
+            Ok(value) => {
+                if let Some(data) = value.get("data") {
+                    // OpenAI format
+                    data.as_array()
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .filter_map(|item| item.get("embedding").and_then(|e| e.as_array()))
+                        .map(|e| e.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect())
+                        .collect()
+                } else if let Some(embedding) = value.get("embedding") {
+                    // Ollama format
+                    if let Some(emb) = embedding.as_array() {
+                        vec![emb.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect()]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+            Err(e) => {
+                return Err(EmbeddingError::Parse(e.to_string()));
+            }
+        };
 
         debug!(
             "Embedded {} texts (dims={})",

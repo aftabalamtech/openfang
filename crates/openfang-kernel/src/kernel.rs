@@ -739,14 +739,15 @@ impl OpenFangKernel {
                     }
                 }
             } else {
-                // Try Ollama (local, no key needed)
-                match create_embedding_driver("ollama", "nomic-embed-text", "") {
+                // Try Ollama (local, no key needed) with configured embedding model
+                let embedding_model = &config.memory.embedding_model;
+                match create_embedding_driver("ollama", embedding_model, "") {
                     Ok(d) => {
-                        info!("Embedding driver auto-detected: Ollama (local)");
+                        info!(model = %embedding_model, "Embedding driver auto-detected: Ollama (local)");
                         Some(Arc::from(d))
                     }
                     Err(e) => {
-                        debug!("No embedding driver available (Ollama probe failed: {e}) — using text search fallback");
+                        debug!(model = %embedding_model, "No embedding driver available (Ollama probe failed: {e}) — using text search fallback");
                         None
                     }
                 }

@@ -288,7 +288,19 @@ impl LlmDriver for OpenAIDriver {
 
         let max_retries = 3;
         for attempt in 0..=max_retries {
-            let url = format!("{}/chat/completions", self.base_url);
+            // Ollama uses different API path structure
+            let url = if self.base_url.contains("11434") || self.base_url.contains("ollama") {
+                // For Ollama: use /api/chat instead of /chat/completions
+                let root = self.base_url.trim_end_matches("/v1").trim_end_matches('/');
+                if root.ends_with("/api") {
+                    format!("{}/chat", root)
+                } else {
+                    format!("{}/api/chat", root)
+                }
+            } else {
+                // For other OpenAI-compatible providers
+                format!("{}/chat/completions", self.base_url)
+            };
             debug!(url = %url, attempt, "Sending OpenAI API request");
 
             let mut req_builder = self
@@ -305,7 +317,10 @@ impl LlmDriver for OpenAIDriver {
             let resp = req_builder
                 .send()
                 .await
-                .map_err(|e| LlmError::Http(e.to_string()))?;
+                .map_err(|e| {
+                    warn!(url = %url, error = %e, "HTTP request failed");
+                    LlmError::Http(e.to_string())
+                })?;
 
             let status = resp.status().as_u16();
             if status == 429 {
@@ -362,8 +377,45 @@ impl LlmDriver for OpenAIDriver {
                 .text()
                 .await
                 .map_err(|e| LlmError::Http(e.to_string()))?;
-            let oai_response: OaiResponse =
-                serde_json::from_str(&body).map_err(|e| LlmError::Parse(e.to_string()))?;
+            
+            // Handle Ollama's response format
+            let oai_response: OaiResponse = if self.base_url.contains("11434") || self.base_url.contains("ollama") {
+                // Ollama returns NDJSON format, process each line
+                let mut content = String::new();
+                for line in body.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    match serde_json::from_str::<serde_json::Value>(line) {
+                        Ok(ollama_response) => {
+                            // Extract the message content from Ollama's response
+                            if let Some(msg) = ollama_response.get("message") {
+                                if let Some(c) = msg.get("content").and_then(|c| c.as_str()) {
+                                    content = c.to_string();
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Ignore parsing errors for individual lines
+                        }
+                    }
+                }
+                
+                // Create a mock OpenAI response
+                OaiResponse {
+                    choices: vec![OaiChoice {
+                        message: OaiResponseMessage {
+                            content: Some(content.clone()),
+                            tool_calls: None,
+                        },
+                        finish_reason: Some("stop".to_string()),
+                    }],
+                    usage: None,
+                }
+            } else {
+                // Standard OpenAI format
+                serde_json::from_str(&body).map_err(|e| LlmError::Parse(e.to_string()))?
+            };
 
             let choice = oai_response
                 .choices
@@ -568,7 +620,19 @@ impl LlmDriver for OpenAIDriver {
         // Retry loop for the initial HTTP request
         let max_retries = 3;
         for attempt in 0..=max_retries {
-            let url = format!("{}/chat/completions", self.base_url);
+            // Ollama uses different API path structure
+            let url = if self.base_url.contains("11434") || self.base_url.contains("ollama") {
+                // For Ollama: use /api/chat instead of /chat/completions
+                let root = self.base_url.trim_end_matches("/v1").trim_end_matches('/');
+                if root.ends_with("/api") {
+                    format!("{}/chat", root)
+                } else {
+                    format!("{}/api/chat", root)
+                }
+            } else {
+                // For other OpenAI-compatible providers
+                format!("{}/chat/completions", self.base_url)
+            };
             debug!(url = %url, attempt, "Sending OpenAI streaming request");
 
             let mut req_builder = self
@@ -585,7 +649,10 @@ impl LlmDriver for OpenAIDriver {
             let resp = req_builder
                 .send()
                 .await
-                .map_err(|e| LlmError::Http(e.to_string()))?;
+                .map_err(|e| {
+                    warn!(url = %url, error = %e, "HTTP request failed");
+                    LlmError::Http(e.to_string())
+                })?;
 
             let status = resp.status().as_u16();
             if status == 429 {
@@ -638,7 +705,7 @@ impl LlmDriver for OpenAIDriver {
                 });
             }
 
-            // Parse the SSE stream
+            // Parse the response stream (SSE for OpenAI, NDJSON for Ollama)
             let mut buffer = String::new();
             let mut text_content = String::new();
             // Track tool calls: index -> (id, name, arguments)
@@ -656,18 +723,22 @@ impl LlmDriver for OpenAIDriver {
                     let line = buffer[..pos].trim_end().to_string();
                     buffer = buffer[pos + 1..].to_string();
 
-                    if line.is_empty() || line.starts_with(':') {
+                    if line.is_empty() {
                         continue;
                     }
 
-                    let data = match line.strip_prefix("data: ") {
-                        Some(d) => d,
-                        None => continue,
+                    // Handle both SSE format (OpenAI) and NDJSON format (Ollama)
+                    let data = if line.starts_with("data: ") {
+                        // SSE format
+                        let data = line.strip_prefix("data: ").unwrap_or("");
+                        if data == "[DONE]" {
+                            continue;
+                        }
+                        data
+                    } else {
+                        // NDJSON format (Ollama)
+                        &line
                     };
-
-                    if data == "[DONE]" {
-                        continue;
-                    }
 
                     let json: serde_json::Value = match serde_json::from_str(data) {
                         Ok(v) => v,
@@ -684,71 +755,133 @@ impl LlmDriver for OpenAIDriver {
                         }
                     }
 
-                    let choices = match json["choices"].as_array() {
-                        Some(c) => c,
-                        None => continue,
-                    };
-
-                    for choice in choices {
-                        let delta = &choice["delta"];
-
-                        // Text content delta
-                        if let Some(text) = delta["content"].as_str() {
-                            if !text.is_empty() {
-                                text_content.push_str(text);
-                                let _ = tx
-                                    .send(StreamEvent::TextDelta {
-                                        text: text.to_string(),
-                                    })
-                                    .await;
-                            }
-                        }
-
-                        // Tool call deltas
-                        if let Some(calls) = delta["tool_calls"].as_array() {
-                            for call in calls {
-                                let idx = call["index"].as_u64().unwrap_or(0) as usize;
-
-                                // Ensure tool_accum has enough entries
-                                while tool_accum.len() <= idx {
-                                    tool_accum.push((String::new(), String::new(), String::new()));
-                                }
-
-                                // ID (sent in first chunk for this tool)
-                                if let Some(id) = call["id"].as_str() {
-                                    tool_accum[idx].0 = id.to_string();
-                                }
-
-                                if let Some(func) = call.get("function") {
-                                    // Name (sent in first chunk)
-                                    if let Some(name) = func["name"].as_str() {
-                                        tool_accum[idx].1 = name.to_string();
-                                        let _ = tx
-                                            .send(StreamEvent::ToolUseStart {
-                                                id: tool_accum[idx].0.clone(),
-                                                name: name.to_string(),
-                                            })
-                                            .await;
-                                    }
-
-                                    // Arguments delta
-                                    if let Some(args) = func["arguments"].as_str() {
-                                        tool_accum[idx].2.push_str(args);
-                                        if !args.is_empty() {
+                    // Handle both OpenAI format and Ollama format
+                    if json.get("choices").is_some() {
+                        // OpenAI format
+                        if let Some(choices) = json["choices"].as_array() {
+                            for choice in choices {
+                                // Handle OpenAI format (delta)
+                                if let Some(delta) = choice.get("delta") {
+                                    // Text content delta
+                                    if let Some(text) = delta["content"].as_str() {
+                                        if !text.is_empty() {
+                                            text_content.push_str(text);
                                             let _ = tx
-                                                .send(StreamEvent::ToolInputDelta {
-                                                    text: args.to_string(),
+                                                .send(StreamEvent::TextDelta {
+                                                    text: text.to_string(),
                                                 })
                                                 .await;
+                                        }
+                                    }
+
+                                    // Tool call deltas
+                                    if let Some(calls) = delta["tool_calls"].as_array() {
+                                        for call in calls {
+                                            let idx = call["index"].as_u64().unwrap_or(0) as usize;
+
+                                            // Ensure tool_accum has enough entries
+                                            while tool_accum.len() <= idx {
+                                                tool_accum.push((String::new(), String::new(), String::new()));
+                                            }
+
+                                            // ID (sent in first chunk for this tool)
+                                            if let Some(id) = call["id"].as_str() {
+                                                tool_accum[idx].0 = id.to_string();
+                                            }
+
+                                            if let Some(func) = call.get("function") {
+                                                // Name (sent in first chunk)
+                                                if let Some(name) = func["name"].as_str() {
+                                                    tool_accum[idx].1 = name.to_string();
+                                                    let _ = tx
+                                                        .send(StreamEvent::ToolUseStart {
+                                                            id: tool_accum[idx].0.clone(),
+                                                            name: name.to_string(),
+                                                        })
+                                                        .await;
+                                                }
+
+                                                // Arguments delta
+                                                if let Some(args) = func["arguments"].as_str() {
+                                                    tool_accum[idx].2.push_str(args);
+                                                    if !args.is_empty() {
+                                                        let _ = tx
+                                                            .send(StreamEvent::ToolInputDelta {
+                                                                text: args.to_string(),
+                                                            })
+                                                            .await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Finish reason
+                                if let Some(fr) = choice["finish_reason"].as_str() {
+                                    finish_reason = Some(fr.to_string());
+                                }
+                            }
+                        }
+                    } else if json.get("message").is_some() {
+                        // Ollama format
+                        if let Some(message) = json.get("message") {
+                            // Text content
+                            if let Some(text) = message["content"].as_str() {
+                                if !text.is_empty() {
+                                    text_content.push_str(text);
+                                    let _ = tx
+                                        .send(StreamEvent::TextDelta {
+                                            text: text.to_string(),
+                                        })
+                                        .await;
+                                }
+                            }
+
+                            // Tool calls
+                            if let Some(calls) = message["tool_calls"].as_array() {
+                                for (idx, call) in calls.iter().enumerate() {
+                                    // Ensure tool_accum has enough entries
+                                    while tool_accum.len() <= idx {
+                                        tool_accum.push((String::new(), String::new(), String::new()));
+                                    }
+
+                                    // ID
+                                    if let Some(id) = call["id"].as_str() {
+                                        tool_accum[idx].0 = id.to_string();
+                                    }
+
+                                    if let Some(func) = call.get("function") {
+                                        // Name
+                                        if let Some(name) = func["name"].as_str() {
+                                            tool_accum[idx].1 = name.to_string();
+                                            let _ = tx
+                                                .send(StreamEvent::ToolUseStart {
+                                                    id: tool_accum[idx].0.clone(),
+                                                    name: name.to_string(),
+                                                })
+                                                .await;
+                                        }
+
+                                        // Arguments
+                                        if let Some(args) = func["arguments"].as_str() {
+                                            tool_accum[idx].2.push_str(args);
+                                            if !args.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamEvent::ToolInputDelta {
+                                                        text: args.to_string(),
+                                                    })
+                                                    .await;
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // Finish reason
-                        if let Some(fr) = choice["finish_reason"].as_str() {
-                            finish_reason = Some(fr.to_string());
+                        // Finish reason for Ollama
+                        if let Some(_fr) = json.get("done").and_then(|v| v.as_bool()).filter(|&b| b) {
+                            finish_reason = Some("stop".to_string());
                         }
                     }
                 }
