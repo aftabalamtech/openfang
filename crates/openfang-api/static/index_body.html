@@ -1349,63 +1349,8 @@
                   </defs>
                   <rect x="-2000" y="-2000" width="6000" height="6000" fill="url(#wf-grid)"/>
 
-                  <!-- Connections -->
-                  <template x-for="conn in connections" :key="conn.id">
-                    <g>
-                      <path :d="getConnectionPath(conn)" fill="none" stroke="var(--text-dim)" stroke-width="2"
-                            style="cursor:pointer" @click.stop="selectedConnection = conn"
-                            :stroke="selectedConnection && selectedConnection.id === conn.id ? 'var(--accent)' : 'var(--text-dim)'"
-                            :stroke-width="selectedConnection && selectedConnection.id === conn.id ? 3 : 2"/>
-                      <!-- Arrow at midpoint -->
-                    </g>
-                  </template>
-
-                  <!-- Connection preview line -->
-                  <template x-if="connecting && connectPreview">
-                    <path :d="getPreviewPath()" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6,3"/>
-                  </template>
-
-                  <!-- Nodes -->
-                  <template x-for="node in nodes" :key="node.id">
-                    <g class="wf-node" :transform="'translate(' + node.x + ',' + node.y + ')'"
-                       @mousedown="onNodeMouseDown(node, $event)" @dblclick="editNode(node)">
-                      <!-- Node body -->
-                      <rect x="0" y="0" :width="node.width" :height="node.height" rx="8" ry="8"
-                            :fill="selectedNode && selectedNode.id === node.id ? 'var(--card-bg)' : 'var(--bg-secondary)'"
-                            :stroke="selectedNode && selectedNode.id === node.id ? node.color : 'var(--border)'"
-                            stroke-width="2" style="cursor:grab"/>
-                      <!-- Color accent bar -->
-                      <rect x="0" y="0" width="6" :height="node.height" rx="3" ry="0" :fill="node.color"/>
-                      <!-- Icon -->
-                      <circle cx="28" :cy="node.height/2" r="14" :fill="node.color" opacity="0.15"/>
-                      <text x="28" :y="node.height/2 + 4" text-anchor="middle" :fill="node.color"
-                            style="font-size:12px;font-weight:700;pointer-events:none" x-text="node.icon"></text>
-                      <!-- Label -->
-                      <text x="50" :y="node.height/2 - 4" fill="var(--text)" style="font-size:12px;font-weight:600;pointer-events:none"
-                            x-text="node.label"></text>
-                      <!-- Sub-label (config hint) -->
-                      <text x="50" :y="node.height/2 + 12" fill="var(--text-dim)" style="font-size:10px;pointer-events:none"
-                            x-text="node.type === 'agent' ? (node.config.agent_name || 'No agent') :
-                                    node.type === 'condition' ? (node.config.expression || 'No condition') :
-                                    node.type === 'loop' ? ('max ' + (node.config.max_iterations || 5) + ' iters') :
-                                    node.type === 'parallel' ? (node.config.fan_count + ' branches') :
-                                    node.type === 'collect' ? node.config.strategy : ''"></text>
-
-                      <!-- Input ports -->
-                      <template x-for="pi in Array.from({length: node.ports.in}, function(_,i){return i})" :key="'in-'+pi">
-                        <circle class="wf-port wf-port-in" :cx="node.width / (node.ports.in + 1) * (pi + 1)" cy="0" r="6"
-                                fill="var(--bg-secondary)" stroke="var(--text-dim)" stroke-width="2"
-                                @mouseup.stop="endConnect(node.id, pi, $event)"/>
-                      </template>
-
-                      <!-- Output ports -->
-                      <template x-for="po in Array.from({length: node.ports.out}, function(_,i){return i})" :key="'out-'+po">
-                        <circle class="wf-port wf-port-out" :cx="node.width / (node.ports.out + 1) * (po + 1)" :cy="node.height" r="6"
-                                fill="var(--bg-secondary)" :stroke="node.color" stroke-width="2"
-                                @mousedown.stop="startConnect(node.id, po, $event)"/>
-                      </template>
-                    </g>
-                  </template>
+                  <!-- Manually rendered nodes & connections (Alpine x-for breaks inside SVG) -->
+                  <g id="wf-render-group" x-effect="nodes.length; connections.length; selectedNode; selectedConnection; connecting; connectPreview; scheduleRender()"></g>
                 </g>
               </svg>
 

@@ -405,6 +405,26 @@ enum HandCommands {
         /// Hand ID.
         id: String,
     },
+    /// Check dependency status for a hand.
+    CheckDeps {
+        /// Hand ID.
+        id: String,
+    },
+    /// Install missing dependencies for a hand.
+    InstallDeps {
+        /// Hand ID.
+        id: String,
+    },
+    /// Pause a running hand instance.
+    Pause {
+        /// Instance ID (from `hand active`).
+        id: String,
+    },
+    /// Resume a paused hand instance.
+    Resume {
+        /// Instance ID (from `hand active`).
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -612,6 +632,9 @@ enum CronCommands {
         spec: String,
         /// Prompt to send when the job fires.
         prompt: String,
+        /// Optional job name (auto-generated if omitted).
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Delete a scheduled job.
     Delete {
@@ -890,6 +913,10 @@ fn main() {
             HandCommands::Activate { id } => cmd_hand_activate(&id),
             HandCommands::Deactivate { id } => cmd_hand_deactivate(&id),
             HandCommands::Info { id } => cmd_hand_info(&id),
+            HandCommands::CheckDeps { id } => cmd_hand_check_deps(&id),
+            HandCommands::InstallDeps { id } => cmd_hand_install_deps(&id),
+            HandCommands::Pause { id } => cmd_hand_pause(&id),
+            HandCommands::Resume { id } => cmd_hand_resume(&id),
         },
         Some(Commands::Config(sub)) => match sub {
             ConfigCommands::Show => cmd_config_show(),
@@ -940,7 +967,8 @@ fn main() {
                 agent,
                 spec,
                 prompt,
-            } => cmd_cron_create(&agent, &spec, &prompt),
+                name,
+            } => cmd_cron_create(&agent, &spec, &prompt, name.as_deref()),
             CronCommands::Delete { id } => cmd_cron_delete(&id),
             CronCommands::Enable { id } => cmd_cron_toggle(&id, true),
             CronCommands::Disable { id } => cmd_cron_toggle(&id, false),
@@ -3952,6 +3980,87 @@ fn cmd_hand_info(id: &str) {
     );
 }
 
+fn cmd_hand_check_deps(id: &str) {
+    let base = require_daemon("hand check-deps");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/hands/{id}/check-deps"))
+            .send(),
+    );
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+    } else {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    }
+}
+
+fn cmd_hand_install_deps(id: &str) {
+    let base = require_daemon("hand install-deps");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/hands/{id}/install-deps"))
+            .send(),
+    );
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+    } else {
+        ui::success(&format!("Dependencies installed for hand '{id}'."));
+        if let Some(results) = body.get("results") {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(results).unwrap_or_default()
+            );
+        }
+    }
+}
+
+fn cmd_hand_pause(id: &str) {
+    let base = require_daemon("hand pause");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/hands/instances/{id}/pause"))
+            .send(),
+    );
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+    } else {
+        ui::success(&format!("Hand instance '{id}' paused."));
+    }
+}
+
+fn cmd_hand_resume(id: &str) {
+    let base = require_daemon("hand resume");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/hands/instances/{id}/resume"))
+            .send(),
+    );
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+    } else {
+        ui::success(&format!("Hand instance '{id}' resumed."));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Provider / API key helpers
 // ---------------------------------------------------------------------------
@@ -4220,6 +4329,31 @@ fn cmd_config_set(key: &str, value: &str) {
     }
 
     let last_key = parts[parts.len() - 1];
+
+    // Validate: single-part keys must be known scalar fields, not sections.
+    // Writing a section name as a scalar silently breaks config deserialization.
+    if parts.len() == 1 {
+        let known_scalars = [
+            "home_dir",
+            "data_dir",
+            "log_level",
+            "api_listen",
+            "network_enabled",
+            "api_key",
+            "language",
+            "max_cron_jobs",
+            "usage_footer",
+            "workspaces_dir",
+        ];
+        if !known_scalars.contains(&last_key) {
+            ui::error_with_fix(
+                &format!("'{last_key}' is a section, not a scalar"),
+                &format!("Use dotted notation: {last_key}.field_name"),
+            );
+            std::process::exit(1);
+        }
+    }
+
     let tbl = current.as_table_mut().unwrap_or_else(|| {
         ui::error(&format!("Parent of '{key}' is not a table"));
         std::process::exit(1);
@@ -5124,16 +5258,40 @@ fn cmd_cron_list(json: bool) {
     }
 }
 
-fn cmd_cron_create(agent: &str, spec: &str, prompt: &str) {
+fn cmd_cron_create(agent: &str, spec: &str, prompt: &str, explicit_name: Option<&str>) {
     let base = require_daemon("cron create");
     let client = daemon_client();
+
+    // Use explicit name if provided, otherwise derive from agent + prompt
+    let name = if let Some(n) = explicit_name {
+        n.to_string()
+    } else {
+        let short_prompt: String = prompt
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("-")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .take(64)
+            .collect();
+        format!("{}-{}", agent, if short_prompt.is_empty() { "job" } else { &short_prompt })
+    };
+
     let body = daemon_json(
         client
             .post(format!("{base}/api/cron/jobs"))
             .json(&serde_json::json!({
                 "agent_id": agent,
-                "cron_expr": spec,
-                "prompt": prompt,
+                "name": name,
+                "schedule": {
+                    "kind": "cron",
+                    "expr": spec
+                },
+                "action": {
+                    "kind": "agent_turn",
+                    "message": prompt
+                }
             }))
             .send(),
     );

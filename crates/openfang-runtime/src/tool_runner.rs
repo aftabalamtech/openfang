@@ -187,8 +187,11 @@ pub async fn execute_tool(
                     is_error: true,
                 };
             }
+            let method = input["method"].as_str().unwrap_or("GET");
+            let headers = input.get("headers").and_then(|v| v.as_object());
+            let body = input["body"].as_str();
             if let Some(ctx) = web_ctx {
-                ctx.fetch.fetch(url).await
+                ctx.fetch.fetch_with_options(url, method, headers, body).await
             } else {
                 tool_web_fetch_legacy(input).await
             }
@@ -533,11 +536,14 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         // --- Web tools ---
         ToolDefinition {
             name: "web_fetch".to_string(),
-            description: "Fetch a web page and extract its content as Markdown. Includes SSRF protection and result caching.".to_string(),
+            description: "Fetch a URL with SSRF protection. Supports GET/POST/PUT/PATCH/DELETE. For GET, HTML is converted to Markdown. For other methods, returns raw response body.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "url": { "type": "string", "description": "The URL to fetch (http/https only)" }
+                    "url": { "type": "string", "description": "The URL to fetch (http/https only)" },
+                    "method": { "type": "string", "enum": ["GET","POST","PUT","PATCH","DELETE"], "description": "HTTP method (default: GET)" },
+                    "headers": { "type": "object", "description": "Custom HTTP headers as key-value pairs" },
+                    "body": { "type": "string", "description": "Request body for POST/PUT/PATCH" }
                 },
                 "required": ["url"]
             }),

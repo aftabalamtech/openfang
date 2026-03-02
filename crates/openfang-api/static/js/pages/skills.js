@@ -19,6 +19,8 @@ function skillsPage() {
     installingSlug: null,
     installResult: null,
     _searchTimer: null,
+    _browseCache: {},    // { key: { ts, data } } client-side 60s cache
+    _searchCache: {},
 
     // Skill detail modal
     skillDetail: null,
@@ -146,9 +148,16 @@ function skillsPage() {
       if (this._searchTimer) clearTimeout(this._searchTimer);
     },
 
-    // ClawHub browse by sort
+    // ClawHub browse by sort (with 60s client-side cache)
     async browseClawHub(sort) {
       this.clawhubSort = sort || 'trending';
+      var ckey = 'browse:' + this.clawhubSort;
+      var cached = this._browseCache[ckey];
+      if (cached && (Date.now() - cached.ts) < 60000) {
+        this.clawhubBrowseResults = cached.data.items || [];
+        this.clawhubNextCursor = cached.data.next_cursor || null;
+        return;
+      }
       this.clawhubLoading = true;
       this.clawhubError = '';
       this.clawhubNextCursor = null;
@@ -157,6 +166,7 @@ function skillsPage() {
         this.clawhubBrowseResults = data.items || [];
         this.clawhubNextCursor = data.next_cursor || null;
         if (data.error) this.clawhubError = data.error;
+        this._browseCache[ckey] = { ts: Date.now(), data: data };
       } catch(e) {
         this.clawhubBrowseResults = [];
         this.clawhubError = e.message || 'Browse failed';
