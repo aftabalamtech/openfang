@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tracing::info;
+use tokio::time;
 
 // ---------------------------------------------------------------------------
 // API response types (matching actual ClawHub v1 API — verified Feb 2026)
@@ -427,20 +428,33 @@ impl ClawHubClient {
 
         info!(slug, "Downloading skill from ClawHub");
 
-        let response = self
-            .client
-            .get(&url)
-            .header("User-Agent", "OpenFang/0.1")
-            .send()
-            .await
-            .map_err(|e| SkillError::Network(format!("ClawHub download failed: {e}")))?;
+        // Add retry logic for 429 Too Many Requests
+        let mut retries = 3;
+        let mut response = loop {
+            let resp = self
+                .client
+                .get(&url)
+                .header("User-Agent", "OpenFang/0.1")
+                .send()
+                .await
+                .map_err(|e| SkillError::Network(format!("ClawHub download failed: {e}")))?;
 
-        if !response.status().is_success() {
-            return Err(SkillError::Network(format!(
-                "ClawHub download returned {}",
-                response.status()
-            )));
-        }
+            if resp.status().is_success() {
+                break Ok(resp);
+            } else if resp.status() == 429 && retries > 0 {
+                // Too Many Requests - retry with backoff
+                retries -= 1;
+                let backoff_ms = 1000 * (3 - retries); // 1s, 2s, 3s
+                info!(slug, retries, backoff_ms, "ClawHub rate limited, retrying...");
+                tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                continue;
+            } else {
+                break Err(SkillError::Network(format!(
+                    "ClawHub download returned {}",
+                    resp.status()
+                )));
+            }
+        }?;
 
         let bytes = response
             .bytes()
