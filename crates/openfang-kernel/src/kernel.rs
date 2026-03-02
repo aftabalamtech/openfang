@@ -130,7 +130,8 @@ pub struct OpenFangKernel {
     /// WhatsApp Web gateway child process PID (for shutdown cleanup).
     pub whatsapp_gateway_pid: Arc<std::sync::Mutex<Option<u32>>>,
     /// Channel adapters registered at bridge startup (for proactive `channel_send` tool).
-    pub channel_adapters: dashmap::DashMap<String, Arc<dyn openfang_channels::types::ChannelAdapter>>,
+    pub channel_adapters:
+        dashmap::DashMap<String, Arc<dyn openfang_channels::types::ChannelAdapter>>,
     /// Weak self-reference for trigger dispatch (set after Arc wrapping).
     self_handle: OnceLock<Weak<OpenFangKernel>>,
 }
@@ -919,10 +920,10 @@ impl OpenFangKernel {
                         &mut restored_entry.manifest.resources,
                     );
 
-                    // Apply default_model to restored agents (same logic as spawn)
-                    if restored_entry.manifest.model.api_key_env.is_none()
-                        && restored_entry.manifest.model.base_url.is_none()
-                    {
+                    // Apply default_model to restored agents (same logic as spawn).
+                    // Only apply when the manifest model config is still at its
+                    // built-in defaults (i.e. no explicit model/provider in source TOML).
+                    if should_apply_default_model_overlay(&restored_entry.manifest.model) {
                         let dm = &kernel.config.default_model;
                         if !dm.provider.is_empty() {
                             restored_entry.manifest.model.provider = dm.provider.clone();
@@ -998,9 +999,10 @@ impl OpenFangKernel {
         }
         info!(agent = %name, id = %agent_id, exec_mode = ?manifest.exec_policy.as_ref().map(|p| &p.mode), "Agent exec_policy resolved");
 
-        // Overlay kernel default_model onto agent if no custom key/url is set.
-        // This ensures agents respect the user's configured provider from `openfang init`.
-        if manifest.model.api_key_env.is_none() && manifest.model.base_url.is_none() {
+        // Overlay kernel default_model only when the manifest model config is
+        // still at the built-in defaults. This preserves explicitly chosen
+        // provider/model values from Raw TOML and templates.
+        if should_apply_default_model_overlay(&manifest.model) {
             let dm = &self.config.default_model;
             if !dm.provider.is_empty() {
                 manifest.model.provider = dm.provider.clone();
@@ -1023,9 +1025,10 @@ impl OpenFangKernel {
         apply_budget_defaults(&self.config.budget, &mut manifest.resources);
 
         // Create workspace directory for the agent (name-based, so SOUL.md survives recreation)
-        let workspace_dir = manifest.workspace.clone().unwrap_or_else(|| {
-            self.config.effective_workspaces_dir().join(&name)
-        });
+        let workspace_dir = manifest
+            .workspace
+            .clone()
+            .unwrap_or_else(|| self.config.effective_workspaces_dir().join(&name));
         ensure_workspace(&workspace_dir)?;
         if manifest.generate_identity_files {
             generate_identity_files(&workspace_dir, &manifest);
@@ -2330,15 +2333,11 @@ impl OpenFangKernel {
     /// Switch an agent's model.
     pub fn set_agent_model(&self, agent_id: AgentId, model: &str) -> KernelResult<()> {
         // Resolve provider from model catalog so switching models also switches provider
-        let resolved_provider = self
-            .model_catalog
-            .read()
-            .ok()
-            .and_then(|catalog| {
-                catalog
-                    .find_model(model)
-                    .map(|entry| entry.provider.clone())
-            });
+        let resolved_provider = self.model_catalog.read().ok().and_then(|catalog| {
+            catalog
+                .find_model(model)
+                .map(|entry| entry.provider.clone())
+        });
 
         // If catalog lookup failed, try to infer provider from model name prefix
         let provider = resolved_provider.or_else(|| infer_provider_from_model(model));
@@ -4104,7 +4103,12 @@ impl OpenFangKernel {
         // Apply per-agent tool allowlist/blocklist (manifest-level filtering)
         let (tool_allowlist, tool_blocklist) = entry
             .as_ref()
-            .map(|e| (e.manifest.tool_allowlist.clone(), e.manifest.tool_blocklist.clone()))
+            .map(|e| {
+                (
+                    e.manifest.tool_allowlist.clone(),
+                    e.manifest.tool_blocklist.clone(),
+                )
+            })
             .unwrap_or_default();
 
         if !tool_allowlist.is_empty() {
@@ -4263,7 +4267,8 @@ impl OpenFangKernel {
                 tool_names.join(", ")
             ));
         }
-        summary.push_str("MCP tools are prefixed with mcp_{server}_ and work like regular tools.\n");
+        summary
+            .push_str("MCP tools are prefixed with mcp_{server}_ and work like regular tools.\n");
         // Add filesystem-specific guidance when a filesystem MCP server is connected
         let has_filesystem = servers.keys().any(|s| s.contains("filesystem"));
         if has_filesystem {
@@ -4422,6 +4427,20 @@ fn apply_budget_defaults(
     }
 }
 
+/// Whether kernel `default_model` should overlay this manifest model config.
+///
+/// We only overlay when the manifest still carries built-in default model
+/// values and no per-agent key/url override is present. This means agents with
+/// explicitly selected provider/model (e.g. via Raw TOML) keep their choices.
+fn should_apply_default_model_overlay(model: &ModelConfig) -> bool {
+    if model.api_key_env.is_some() || model.base_url.is_some() {
+        return false;
+    }
+
+    let defaults = ModelConfig::default();
+    model.provider == defaults.provider && model.model == defaults.model
+}
+
 /// Infer provider from a model name when catalog lookup fails.
 ///
 /// Uses well-known model name prefixes to map to the correct provider.
@@ -4450,16 +4469,26 @@ fn infer_provider_from_model(model: &str) -> Option<String> {
         Some("gemini".to_string())
     } else if lower.starts_with("claude") {
         Some("anthropic".to_string())
-    } else if lower.starts_with("gpt") || lower.starts_with("o1") || lower.starts_with("o3") || lower.starts_with("o4") {
+    } else if lower.starts_with("gpt")
+        || lower.starts_with("o1")
+        || lower.starts_with("o3")
+        || lower.starts_with("o4")
+    {
         Some("openai".to_string())
-    } else if lower.starts_with("llama") || lower.starts_with("mixtral") || lower.starts_with("qwen") {
+    } else if lower.starts_with("llama")
+        || lower.starts_with("mixtral")
+        || lower.starts_with("qwen")
+    {
         // These could be on multiple providers; don't infer
         None
     } else if lower.starts_with("grok") {
         Some("xai".to_string())
     } else if lower.starts_with("deepseek") {
         Some("deepseek".to_string())
-    } else if lower.starts_with("mistral") || lower.starts_with("codestral") || lower.starts_with("pixtral") {
+    } else if lower.starts_with("mistral")
+        || lower.starts_with("codestral")
+        || lower.starts_with("pixtral")
+    {
         Some("mistral".to_string())
     } else if lower.starts_with("command") || lower.starts_with("embed-") {
         Some("cohere".to_string())
@@ -5009,7 +5038,10 @@ impl KernelHandle for OpenFangKernel {
         };
 
         adapter
-            .send(&user, openfang_channels::types::ChannelContent::Text(message.to_string()))
+            .send(
+                &user,
+                openfang_channels::types::ChannelContent::Text(message.to_string()),
+            )
             .await
             .map_err(|e| format!("Channel send failed: {e}"))?;
 
@@ -5327,5 +5359,36 @@ mod tests {
         assert!(!caps
             .iter()
             .any(|c| matches!(c, Capability::ToolInvoke(name) if name == "shell_exec")));
+    }
+
+    #[test]
+    fn test_should_apply_default_model_overlay_for_built_in_defaults() {
+        let model = ModelConfig::default();
+        assert!(should_apply_default_model_overlay(&model));
+    }
+
+    #[test]
+    fn test_should_not_apply_default_model_overlay_for_explicit_model() {
+        let model = ModelConfig {
+            provider: "groq".to_string(),
+            model: "llama-3.3-70b-versatile".to_string(),
+            ..ModelConfig::default()
+        };
+        assert!(!should_apply_default_model_overlay(&model));
+    }
+
+    #[test]
+    fn test_should_not_apply_default_model_overlay_with_custom_key_or_url() {
+        let with_key = ModelConfig {
+            api_key_env: Some("GROQ_API_KEY".to_string()),
+            ..ModelConfig::default()
+        };
+        assert!(!should_apply_default_model_overlay(&with_key));
+
+        let with_url = ModelConfig {
+            base_url: Some("http://localhost:11434/v1".to_string()),
+            ..ModelConfig::default()
+        };
+        assert!(!should_apply_default_model_overlay(&with_url));
     }
 }
