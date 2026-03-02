@@ -4386,6 +4386,7 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse
 
 /// GET /api/usage — Get per-agent usage statistics.
 pub async fn usage_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let usage_store = openfang_memory::usage::UsageStore::new(state.kernel.memory.usage_conn());
     let agents: Vec<serde_json::Value> = state
         .kernel
         .registry
@@ -4393,11 +4394,13 @@ pub async fn usage_stats(State(state): State<Arc<AppState>>) -> impl IntoRespons
         .iter()
         .map(|e| {
             let (tokens, tool_calls) = state.kernel.scheduler.get_usage(e.id).unwrap_or((0, 0));
+            let cost_usd = usage_store.query_daily(e.id).unwrap_or(0.0);
             serde_json::json!({
                 "agent_id": e.id.to_string(),
                 "name": e.name,
                 "total_tokens": tokens,
                 "tool_calls": tool_calls,
+                "cost_usd": cost_usd,
             })
         })
         .collect();
