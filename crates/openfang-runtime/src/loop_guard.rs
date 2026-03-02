@@ -23,7 +23,14 @@ use std::collections::{HashMap, HashSet};
 
 /// Tools that are expected to be polled repeatedly.
 const POLL_TOOLS: &[&str] = &[
-    "shell_exec", // checking command output
+    "shell_exec",        // checking command output
+    "browser_evaluate",  // polling DOM state during automation
+    "browser_navigate",  // multi-page navigation flows
+    "a2a_status",        // polling external agent task status
+    "hand_status",       // checking Hand execution progress
+    "cron_list",         // checking scheduled job state
+    "task_list",         // polling task queue
+    "task_claim",        // competing for tasks
 ];
 
 /// Maximum recent call history size for ping-pong detection.

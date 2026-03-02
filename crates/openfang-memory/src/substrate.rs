@@ -3,6 +3,7 @@
 //! Composes the structured store, semantic store, knowledge store,
 //! session store, and consolidation engine behind a single async API.
 
+use crate::cognitive::CognitiveStore;
 use crate::consolidation::ConsolidationEngine;
 use crate::knowledge::KnowledgeStore;
 use crate::migration::run_migrations;
@@ -33,6 +34,8 @@ pub struct MemorySubstrate {
     sessions: SessionStore,
     consolidation: ConsolidationEngine,
     usage: UsageStore,
+    /// Cognitive memory: episodic, semantic, and procedural layers.
+    cognitive: CognitiveStore,
 }
 
 impl MemorySubstrate {
@@ -44,6 +47,13 @@ impl MemorySubstrate {
         run_migrations(&conn).map_err(|e| OpenFangError::Memory(e.to_string()))?;
         let shared = Arc::new(Mutex::new(conn));
 
+        // Initialize cognitive memory table
+        {
+            let c = shared.lock().map_err(|e| OpenFangError::Memory(e.to_string()))?;
+            CognitiveStore::create_table(&c).map_err(|e| OpenFangError::Memory(e.to_string()))?;
+        }
+
+        let cognitive_decay = decay_rate as f64 * 0.1; // slower decay for cognitive memories
         Ok(Self {
             conn: Arc::clone(&shared),
             structured: StructuredStore::new(Arc::clone(&shared)),
@@ -51,6 +61,7 @@ impl MemorySubstrate {
             knowledge: KnowledgeStore::new(Arc::clone(&shared)),
             sessions: SessionStore::new(Arc::clone(&shared)),
             usage: UsageStore::new(Arc::clone(&shared)),
+            cognitive: CognitiveStore::new(Arc::clone(&shared), cognitive_decay),
             consolidation: ConsolidationEngine::new(shared, decay_rate),
         })
     }
@@ -62,6 +73,13 @@ impl MemorySubstrate {
         run_migrations(&conn).map_err(|e| OpenFangError::Memory(e.to_string()))?;
         let shared = Arc::new(Mutex::new(conn));
 
+        // Initialize cognitive memory table
+        {
+            let c = shared.lock().map_err(|e| OpenFangError::Memory(e.to_string()))?;
+            CognitiveStore::create_table(&c).map_err(|e| OpenFangError::Memory(e.to_string()))?;
+        }
+
+        let cognitive_decay = decay_rate as f64 * 0.1;
         Ok(Self {
             conn: Arc::clone(&shared),
             structured: StructuredStore::new(Arc::clone(&shared)),
@@ -69,6 +87,7 @@ impl MemorySubstrate {
             knowledge: KnowledgeStore::new(Arc::clone(&shared)),
             sessions: SessionStore::new(Arc::clone(&shared)),
             usage: UsageStore::new(Arc::clone(&shared)),
+            cognitive: CognitiveStore::new(Arc::clone(&shared), cognitive_decay),
             consolidation: ConsolidationEngine::new(shared, decay_rate),
         })
     }
@@ -76,6 +95,11 @@ impl MemorySubstrate {
     /// Get a reference to the usage store.
     pub fn usage(&self) -> &UsageStore {
         &self.usage
+    }
+
+    /// Get a reference to the cognitive memory store (episodic/semantic/procedural).
+    pub fn cognitive(&self) -> &CognitiveStore {
+        &self.cognitive
     }
 
     /// Get the shared database connection (for constructing stores from outside).

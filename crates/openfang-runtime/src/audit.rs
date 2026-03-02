@@ -7,7 +7,9 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use tracing::error;
 
 /// Categories of auditable actions within the agent runtime.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +82,9 @@ fn compute_entry_hash(
 pub struct AuditLog {
     entries: Mutex<Vec<AuditEntry>>,
     tip: Mutex<String>,
+    /// Set to true if a mutex was recovered from a poisoned state.
+    /// `verify_integrity()` checks this flag and reports it as corruption.
+    corruption_detected: AtomicBool,
 }
 
 impl AuditLog {
@@ -90,7 +95,39 @@ impl AuditLog {
         Self {
             entries: Mutex::new(Vec::new()),
             tip: Mutex::new("0".repeat(64)),
+            corruption_detected: AtomicBool::new(false),
         }
+    }
+
+    /// Returns true if the audit log has detected mutex poisoning,
+    /// indicating the chain may be in an inconsistent state.
+    pub fn is_corrupted(&self) -> bool {
+        self.corruption_detected.load(Ordering::Acquire)
+    }
+
+    /// Safely acquire the entries lock, flagging corruption on poison recovery.
+    fn lock_entries(&self) -> std::sync::MutexGuard<'_, Vec<AuditEntry>> {
+        self.entries.lock().unwrap_or_else(|e| {
+            error!(
+                "CRITICAL: Audit log entries mutex was poisoned — chain integrity \
+                 may be compromised. Recovering, but all subsequent verify_integrity() \
+                 calls will report corruption."
+            );
+            self.corruption_detected.store(true, Ordering::Release);
+            e.into_inner()
+        })
+    }
+
+    /// Safely acquire the tip lock, flagging corruption on poison recovery.
+    fn lock_tip(&self) -> std::sync::MutexGuard<'_, String> {
+        self.tip.lock().unwrap_or_else(|e| {
+            error!(
+                "CRITICAL: Audit log tip mutex was poisoned — chain integrity \
+                 may be compromised."
+            );
+            self.corruption_detected.store(true, Ordering::Release);
+            e.into_inner()
+        })
     }
 
     /// Records a new auditable event and returns the SHA-256 hash of the entry.
@@ -109,8 +146,8 @@ impl AuditLog {
         let outcome = outcome.into();
         let timestamp = Utc::now().to_rfc3339();
 
-        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        let mut tip = self.tip.lock().unwrap_or_else(|e| e.into_inner());
+        let mut entries = self.lock_entries();
+        let mut tip = self.lock_tip();
 
         let seq = entries.len() as u64;
         let prev_hash = tip.clone();
@@ -139,7 +176,15 @@ impl AuditLog {
     /// Returns `Ok(())` if the chain is intact, or `Err(msg)` describing
     /// the first inconsistency found.
     pub fn verify_integrity(&self) -> Result<(), String> {
-        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        // If a mutex was poisoned at any point, the chain is suspect.
+        if self.corruption_detected.load(Ordering::Acquire) {
+            return Err(
+                "audit log corruption detected: mutex was poisoned during a previous \
+                 operation — chain may contain incomplete or inconsistent entries"
+                    .to_string(),
+            );
+        }
+        let entries = self.lock_entries();
         let mut expected_prev = "0".repeat(64);
 
         for entry in entries.iter() {
@@ -176,25 +221,22 @@ impl AuditLog {
     /// Returns the current tip hash (the hash of the most recent entry,
     /// or the genesis sentinel if the log is empty).
     pub fn tip_hash(&self) -> String {
-        self.tip.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.lock_tip().clone()
     }
 
     /// Returns the number of entries in the log.
     pub fn len(&self) -> usize {
-        self.entries.lock().unwrap_or_else(|e| e.into_inner()).len()
+        self.lock_entries().len()
     }
 
     /// Returns whether the log is empty.
     pub fn is_empty(&self) -> bool {
-        self.entries
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_empty()
+        self.lock_entries().is_empty()
     }
 
     /// Returns up to the most recent `n` entries (cloned).
     pub fn recent(&self, n: usize) -> Vec<AuditEntry> {
-        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let entries = self.lock_entries();
         let start = entries.len().saturating_sub(n);
         entries[start..].to_vec()
     }

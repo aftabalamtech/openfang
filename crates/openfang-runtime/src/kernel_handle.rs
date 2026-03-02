@@ -187,15 +187,26 @@ pub trait KernelHandle: Send + Sync {
     /// Spawn an agent with capability inheritance enforcement.
     /// `parent_caps` are the parent's granted capabilities. The kernel MUST verify
     /// that every capability in the child manifest is covered by `parent_caps`.
+    ///
+    /// The default implementation is **fail-safe**: if `parent_caps` is non-empty
+    /// (i.e., the parent has restricted capabilities), spawning is rejected unless
+    /// the implementor overrides this method with real enforcement logic.
     async fn spawn_agent_checked(
         &self,
         manifest_toml: &str,
         parent_id: Option<&str>,
         parent_caps: &[openfang_types::capability::Capability],
     ) -> Result<(String, String), String> {
-        // Default: delegate to spawn_agent (no enforcement)
-        // The kernel MUST override this with real enforcement
-        let _ = parent_caps;
+        if !parent_caps.is_empty() {
+            // Fail-safe: a restricted parent MUST NOT be able to spawn unchecked children.
+            // Implementors (e.g., OpenFangKernel) override this with real enforcement.
+            return Err(
+                "spawn_agent_checked: capability inheritance enforcement not implemented \
+                 by this KernelHandle — refusing to spawn child from a restricted parent"
+                    .to_string(),
+            );
+        }
+        // Unrestricted parent (empty caps = no restrictions) — delegate normally
         self.spawn_agent(manifest_toml, parent_id).await
     }
 }

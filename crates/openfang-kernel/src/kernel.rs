@@ -141,6 +141,8 @@ pub struct OpenFangKernel {
 /// Stores up to `MAX_RECEIPTS` most recent delivery receipts per agent.
 pub struct DeliveryTracker {
     receipts: dashmap::DashMap<AgentId, Vec<openfang_channels::types::DeliveryReceipt>>,
+    /// Atomic global count — avoids O(n) sum and race condition on eviction.
+    global_count: std::sync::atomic::AtomicUsize,
 }
 
 impl Default for DeliveryTracker {
@@ -157,6 +159,7 @@ impl DeliveryTracker {
     pub fn new() -> Self {
         Self {
             receipts: dashmap::DashMap::new(),
+            global_count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -164,20 +167,32 @@ impl DeliveryTracker {
     pub fn record(&self, agent_id: AgentId, receipt: openfang_channels::types::DeliveryReceipt) {
         let mut entry = self.receipts.entry(agent_id).or_default();
         entry.push(receipt);
+        self.global_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Per-agent cap
         if entry.len() > Self::MAX_PER_AGENT {
             let drain = entry.len() - Self::MAX_PER_AGENT;
             entry.drain(..drain);
+            self.global_count.fetch_sub(drain, std::sync::atomic::Ordering::Relaxed);
         }
-        // Global cap: evict oldest agents' receipts if total exceeds limit
-        drop(entry);
-        let total: usize = self.receipts.iter().map(|e| e.value().len()).sum();
+        // Global cap: evict oldest agents' receipts if total exceeds limit.
+        // Read the atomic counter — no race window, no O(n) iteration.
+        let total = self.global_count.load(std::sync::atomic::Ordering::Relaxed);
         if total > Self::MAX_RECEIPTS {
-            // Simple eviction: remove oldest entries from first agent found
-            if let Some(mut oldest) = self.receipts.iter_mut().next() {
-                let to_remove = total - Self::MAX_RECEIPTS;
-                let drain = to_remove.min(oldest.value().len());
-                oldest.value_mut().drain(..drain);
+            drop(entry); // release per-agent lock before iterating
+            let overshoot = total.saturating_sub(Self::MAX_RECEIPTS);
+            let mut removed = 0usize;
+            for mut kv in self.receipts.iter_mut() {
+                if removed >= overshoot {
+                    break;
+                }
+                let drain = (overshoot - removed).min(kv.value().len());
+                if drain > 0 {
+                    kv.value_mut().drain(..drain);
+                    removed += drain;
+                }
+            }
+            if removed > 0 {
+                self.global_count.fetch_sub(removed, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
@@ -989,10 +1004,8 @@ impl OpenFangKernel {
                         && restored_entry.manifest.model.base_url.is_none()
                     {
                         let dm = &kernel.config.default_model;
-                        let is_default_provider = restored_entry.manifest.model.provider.is_empty()
-                            || restored_entry.manifest.model.provider == "anthropic";
-                        let is_default_model = restored_entry.manifest.model.model.is_empty()
-                            || restored_entry.manifest.model.model == "claude-sonnet-4-20250514";
+                        let is_default_provider = restored_entry.manifest.model.provider.is_empty();
+                        let is_default_model = restored_entry.manifest.model.model.is_empty();
                         if is_default_provider && is_default_model {
                             if !dm.provider.is_empty() {
                                 restored_entry.manifest.model.provider = dm.provider.clone();
