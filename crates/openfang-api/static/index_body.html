@@ -786,6 +786,7 @@
                     <div class="font-bold" style="font-size:13px" x-text="agent.name"></div>
                     <div class="text-xs text-dim font-mono" style="font-size:11px" x-text="agent.model_name"></div>
                   </div>
+                  <button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" @click.stop="showDetail(agent)">Config</button>
                   <span class="badge" :class="'badge-' + agent.state.toLowerCase()" x-text="agent.state" style="font-size:10px"></span>
                 </div>
               </template>
