@@ -1021,13 +1021,9 @@ impl OpenFangKernel {
         // Apply global budget defaults to agent resource quotas
         apply_budget_defaults(&self.config.budget, &mut manifest.resources);
 
-        // Create workspace directory for the agent
+        // Create workspace directory for the agent (name-based, so SOUL.md survives recreation)
         let workspace_dir = manifest.workspace.clone().unwrap_or_else(|| {
-            self.config.effective_workspaces_dir().join(format!(
-                "{}-{}",
-                &name,
-                &agent_id.0.to_string()[..8]
-            ))
+            self.config.effective_workspaces_dir().join(&name)
         });
         ensure_workspace(&workspace_dir)?;
         if manifest.generate_identity_files {
@@ -1351,11 +1347,7 @@ impl OpenFangKernel {
 
         // Lazy backfill: create workspace for existing agents spawned before workspaces
         if manifest.workspace.is_none() {
-            let workspace_dir = self.config.effective_workspaces_dir().join(format!(
-                "{}-{}",
-                &manifest.name,
-                &agent_id.0.to_string()[..8]
-            ));
+            let workspace_dir = self.config.effective_workspaces_dir().join(&manifest.name);
             if let Err(e) = ensure_workspace(&workspace_dir) {
                 warn!(agent_id = %agent_id, "Failed to backfill workspace (streaming): {e}");
             } else {
@@ -1822,11 +1814,7 @@ impl OpenFangKernel {
 
         // Lazy backfill: create workspace for existing agents spawned before workspaces
         if manifest.workspace.is_none() {
-            let workspace_dir = self.config.effective_workspaces_dir().join(format!(
-                "{}-{}",
-                &manifest.name,
-                &agent_id.0.to_string()[..8]
-            ));
+            let workspace_dir = self.config.effective_workspaces_dir().join(&manifest.name);
             if let Err(e) = ensure_workspace(&workspace_dir) {
                 warn!(agent_id = %agent_id, "Failed to backfill workspace: {e}");
             } else {
@@ -2378,6 +2366,10 @@ impl OpenFangKernel {
             let _ = self.memory.save_agent(&entry);
         }
 
+        // Clear canonical session to prevent memory poisoning from old model's responses
+        let _ = self.memory.delete_canonical_session(agent_id);
+        debug!(agent_id = %agent_id, "Cleared canonical session after model switch");
+
         Ok(())
     }
 
@@ -2447,6 +2439,30 @@ impl OpenFangKernel {
         }
 
         info!(agent_id = %agent_id, servers = ?servers, "Agent MCP servers updated");
+        Ok(())
+    }
+
+    /// Update an agent's tool allowlist and/or blocklist.
+    pub fn set_agent_tool_filters(
+        &self,
+        agent_id: AgentId,
+        allowlist: Option<Vec<String>>,
+        blocklist: Option<Vec<String>>,
+    ) -> KernelResult<()> {
+        self.registry
+            .update_tool_filters(agent_id, allowlist.clone(), blocklist.clone())
+            .map_err(KernelError::OpenFang)?;
+
+        if let Some(entry) = self.registry.get(agent_id) {
+            let _ = self.memory.save_agent(&entry);
+        }
+
+        info!(
+            agent_id = %agent_id,
+            allowlist = ?allowlist,
+            blocklist = ?blocklist,
+            "Agent tool filters updated"
+        );
         Ok(())
     }
 
@@ -4072,6 +4088,19 @@ impl OpenFangKernel {
             }
         }
 
+        // Apply per-agent tool allowlist/blocklist (manifest-level filtering)
+        let (tool_allowlist, tool_blocklist) = entry
+            .as_ref()
+            .map(|e| (e.manifest.tool_allowlist.clone(), e.manifest.tool_blocklist.clone()))
+            .unwrap_or_default();
+
+        if !tool_allowlist.is_empty() {
+            all_tools.retain(|t| tool_allowlist.iter().any(|a| a == &t.name));
+        }
+        if !tool_blocklist.is_empty() {
+            all_tools.retain(|t| !tool_blocklist.iter().any(|b| b == &t.name));
+        }
+
         let caps = self.capabilities.list(agent_id);
 
         // If agent has ToolAll, return all tools
@@ -5093,6 +5122,8 @@ mod tests {
             workspace: None,
             generate_identity_files: true,
             exec_policy: None,
+            tool_allowlist: vec![],
+            tool_blocklist: vec![],
         };
         manifest.capabilities.tools = vec!["file_read".to_string(), "web_fetch".to_string()];
         manifest.capabilities.agent_spawn = true;
@@ -5128,6 +5159,8 @@ mod tests {
             workspace: None,
             generate_identity_files: true,
             exec_policy: None,
+            tool_allowlist: vec![],
+            tool_blocklist: vec![],
         }
     }
 

@@ -696,6 +696,16 @@
                   </div>
                 </template>
               </div>
+              <!-- Model autocomplete picker -->
+              <div x-show="showModelPicker && filteredModelPicker.length" class="slash-menu" style="max-height:280px;overflow-y:auto">
+                <div class="text-xs text-dim" style="padding:4px 10px;border-bottom:1px solid var(--border)">Available models — pick one or keep typing</div>
+                <template x-for="(m, idx) in filteredModelPicker" :key="m.id">
+                  <div class="slash-menu-item" :class="{ 'slash-active': idx === modelPickerIdx }" @click="pickModel(m.id)" @mouseenter="modelPickerIdx = idx">
+                    <span class="font-bold" style="font-size:12px;font-family:var(--font-mono)" x-text="m.id"></span>
+                    <span class="text-xs text-dim" x-text="m.provider + (m.display_name && m.display_name !== m.id ? ' · ' + m.display_name : '')"></span>
+                  </div>
+                </template>
+              </div>
               <!-- Input row -->
               <div class="input-row">
                 <button class="btn btn-ghost btn-sm" @click="$refs.fileInput.click()" title="Attach file" style="padding:6px 8px;flex-shrink:0">
@@ -713,10 +723,10 @@
                   <span class="text-xs" style="color:var(--danger)" x-text="formatRecordingTime()"></span>
                 </div>
                 <textarea id="msg-input" rows="1" :placeholder="recording ? 'Recording... release to send' : 'Message OpenFang... (/ for commands)'"
-                          @keydown.enter.prevent="if(!$event.shiftKey){if(showSlashMenu && filteredSlashCommands.length){executeSlashCommand(filteredSlashCommands[slashIdx].cmd)}else{sendMessage()}}"
-                          @keydown.escape="showSlashMenu = false"
-                          @keydown.arrow-up.prevent="if(showSlashMenu){slashIdx = Math.max(0, slashIdx - 1)}"
-                          @keydown.arrow-down.prevent="if(showSlashMenu){slashIdx = Math.min(filteredSlashCommands.length - 1, slashIdx + 1)}"
+                          @keydown.enter.prevent="if(!$event.shiftKey){if(showModelPicker && filteredModelPicker.length){pickModel(filteredModelPicker[modelPickerIdx].id)}else if(showSlashMenu && filteredSlashCommands.length){executeSlashCommand(filteredSlashCommands[slashIdx].cmd)}else{sendMessage()}}"
+                          @keydown.escape="showSlashMenu = false; showModelPicker = false"
+                          @keydown.arrow-up.prevent="if(showModelPicker){modelPickerIdx = Math.max(0, modelPickerIdx - 1)}else if(showSlashMenu){slashIdx = Math.max(0, slashIdx - 1)}"
+                          @keydown.arrow-down.prevent="if(showModelPicker){modelPickerIdx = Math.min(filteredModelPicker.length - 1, modelPickerIdx + 1)}else if(showSlashMenu){slashIdx = Math.min(filteredSlashCommands.length - 1, slashIdx + 1)}"
                           @input="$el.style.height='auto';$el.style.height=Math.min($el.scrollHeight,150)+'px'"
                           x-model="inputText"
                           :class="{ 'streaming-active': sending }"></textarea>
@@ -811,7 +821,7 @@
                 <div class="tabs" style="margin-bottom:16px">
                   <div class="tab" :class="{ active: detailTab === 'info' }" @click="detailTab = 'info'">Info</div>
                   <div class="tab" :class="{ active: detailTab === 'files' }" @click="detailTab = 'files'; loadAgentFiles()">Files</div>
-                  <div class="tab" :class="{ active: detailTab === 'config' }" @click="detailTab = 'config'">Config</div>
+                  <div class="tab" :class="{ active: detailTab === 'config' }" @click="detailTab = 'config'; loadToolFilters()">Config</div>
                 </div>
 
                 <!-- Tab: Info -->
@@ -826,12 +836,29 @@
                     </div>
                     <div class="detail-row" x-show="detailAgent.profile"><span class="detail-label">Profile</span><span class="detail-value" style="text-transform:capitalize" x-text="detailAgent.profile || '-'"></span></div>
                     <div class="detail-row"><span class="detail-label">Provider</span><span class="detail-value" x-text="detailAgent.model_provider"></span></div>
-                    <div class="detail-row"><span class="detail-label">Model</span><span class="detail-value" x-text="detailAgent.model_name"></span></div>
+                    <div class="detail-row"><span class="detail-label">Model</span>
+                      <template x-if="!editingModel">
+                        <span>
+                          <span class="detail-value" x-text="detailAgent.model_name"></span>
+                          <button class="btn btn-ghost btn-sm" style="margin-left:8px;padding:2px 8px;font-size:11px" @click="editingModel = true; newModelValue = detailAgent.model_provider + '/' + detailAgent.model_name">Change</button>
+                        </span>
+                      </template>
+                      <template x-if="editingModel">
+                        <span class="flex gap-1" style="align-items:center">
+                          <input class="form-input" style="width:240px;font-size:12px" x-model="newModelValue" placeholder="provider/model" @keydown.enter="changeModel()" @keydown.escape="editingModel = false">
+                          <button class="btn btn-primary btn-sm" @click="changeModel()" :disabled="modelSaving" style="padding:2px 10px">
+                            <span x-show="!modelSaving">Save</span><span x-show="modelSaving">...</span>
+                          </button>
+                          <button class="btn btn-ghost btn-sm" @click="editingModel = false" style="padding:2px 8px">Cancel</button>
+                        </span>
+                      </template>
+                    </div>
                     <div class="detail-row"><span class="detail-label">Created</span><span class="detail-value" x-text="detailAgent.created_at ? new Date(detailAgent.created_at).toLocaleString() : '-'"></span></div>
                   </div>
                   <div class="flex gap-2 mt-4">
                     <button class="btn btn-primary" @click="chatWithAgent(detailAgent); showDetailModal = false">Chat</button>
                     <button class="btn btn-ghost" @click="cloneAgent(detailAgent)">Clone</button>
+                    <button class="btn btn-ghost" @click="clearHistory(detailAgent)">Clear History</button>
                     <button class="btn btn-danger" @click="killAgent(detailAgent)">Stop</button>
                   </div>
                 </div>
@@ -890,6 +917,36 @@
                   <button class="btn btn-primary mt-4" @click="saveConfig()" :disabled="configSaving">
                     <span x-show="!configSaving">Save Config</span><span x-show="configSaving">Saving...</span>
                   </button>
+
+                  <!-- Tool Filters -->
+                  <div class="mt-4" style="border-top:1px solid var(--border);padding-top:16px">
+                    <h4 style="margin-bottom:8px;font-size:13px">Tool Filters</h4>
+                    <p class="text-xs text-dim" style="margin-bottom:12px">Allowlist: only these tools available (empty = all). Blocklist: these tools excluded.</p>
+                    <div class="form-group">
+                      <label style="font-size:12px">Allowlist <span class="text-dim" x-text="'(' + toolFilters.tool_allowlist.length + ')'"></span></label>
+                      <div class="flex flex-wrap gap-1 mb-1">
+                        <template x-for="(t, i) in toolFilters.tool_allowlist" :key="'al-'+i">
+                          <span class="badge" style="cursor:pointer" @click="removeAllowTool(t)" :title="'Click to remove ' + t"><span x-text="t"></span> &times;</span>
+                        </template>
+                      </div>
+                      <div class="flex gap-1">
+                        <input class="form-input" style="font-size:12px;flex:1" x-model="newAllowTool" placeholder="tool name" @keydown.enter="addAllowTool()">
+                        <button class="btn btn-ghost btn-sm" @click="addAllowTool()">Add</button>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label style="font-size:12px">Blocklist <span class="text-dim" x-text="'(' + toolFilters.tool_blocklist.length + ')'"></span></label>
+                      <div class="flex flex-wrap gap-1 mb-1">
+                        <template x-for="(t, i) in toolFilters.tool_blocklist" :key="'bl-'+i">
+                          <span class="badge badge-danger" style="cursor:pointer" @click="removeBlockTool(t)" :title="'Click to remove ' + t"><span x-text="t"></span> &times;</span>
+                        </template>
+                      </div>
+                      <div class="flex gap-1">
+                        <input class="form-input" style="font-size:12px;flex:1" x-model="newBlockTool" placeholder="tool name" @keydown.enter="addBlockTool()">
+                        <button class="btn btn-ghost btn-sm" @click="addBlockTool()">Add</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2995,7 +3052,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                 <tbody>
                   <template x-for="m in filteredModels" :key="m.id">
                     <tr>
-                      <td class="font-bold" style="font-size:11px" x-text="m.display_name || m.id"></td>
+                      <td style="font-size:11px"><div class="font-bold" x-text="m.display_name || m.id"></div><div class="text-xs text-dim" style="font-family:var(--font-mono);opacity:0.7;user-select:all" x-show="m.display_name && m.display_name !== m.id" x-text="m.id"></div></td>
                       <td class="text-dim" x-text="m.provider"></td>
                       <td><span class="tier-badge" :class="tierBadgeClass(m.tier)" x-text="m.tier || '-'"></span></td>
                       <td class="text-xs" x-text="formatContext(m.context_window)"></td>

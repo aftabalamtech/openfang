@@ -208,7 +208,10 @@ const TOOL_CALL_BEHAVIOR: &str = "\
 - Prefer action over narration. If you can answer by using a tool, do it.
 - When executing multiple sequential tool calls, batch them — don't output reasoning between each call.
 - If a tool returns useful results, present the KEY information, not the raw output.
-- Start with the answer, not meta-commentary about how you'll help.";
+- Start with the answer, not meta-commentary about how you'll help.
+- IMPORTANT: If your instructions or persona mention a shell command, script path, or code snippet, \
+execute it via the appropriate tool call (shell_exec, file_write, etc.). Never output commands as \
+code blocks — always call the tool instead.";
 
 /// Build the grouped tools section (Section 3).
 pub fn build_tools_section(granted_tools: &[String]) -> String {
@@ -322,9 +325,10 @@ fn build_persona_section(
 
     if let Some(soul) = soul_md {
         if !soul.trim().is_empty() {
+            let sanitized = strip_code_blocks(soul);
             parts.push(format!(
                 "## Persona\nEmbody this identity in your tone and communication style. Be natural, not stiff or generic.\n{}",
-                cap_str(soul, 1000)
+                cap_str(&sanitized, 1000)
             ));
         }
     }
@@ -552,6 +556,30 @@ pub fn tool_hint(name: &str) -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// Cap a string to `max_chars`, appending "..." if truncated.
+/// Strip markdown triple-backtick code blocks from content.
+///
+/// Prevents LLMs from copying code blocks as text output instead of making
+/// tool calls when SOUL.md contains command examples.
+fn strip_code_blocks(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut in_block = false;
+    for line in content.lines() {
+        if line.trim_start().starts_with("```") {
+            in_block = !in_block;
+            continue;
+        }
+        if !in_block {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    // Collapse multiple blank lines left by stripped blocks
+    while result.contains("\n\n\n") {
+        result = result.replace("\n\n\n", "\n\n");
+    }
+    result.trim().to_string()
+}
+
 fn cap_str(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()

@@ -199,6 +199,27 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Update an agent's tool allowlist and blocklist.
+    pub fn update_tool_filters(
+        &self,
+        id: AgentId,
+        allowlist: Option<Vec<String>>,
+        blocklist: Option<Vec<String>>,
+    ) -> OpenFangResult<()> {
+        let mut entry = self
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| OpenFangError::AgentNotFound(id.to_string()))?;
+        if let Some(al) = allowlist {
+            entry.manifest.tool_allowlist = al;
+        }
+        if let Some(bl) = blocklist {
+            entry.manifest.tool_blocklist = bl;
+        }
+        entry.last_active = chrono::Utc::now();
+        Ok(())
+    }
+
     /// Update an agent's system prompt (hot-swap, takes effect on next message).
     pub fn update_system_prompt(&self, id: AgentId, new_prompt: String) -> OpenFangResult<()> {
         let mut entry = self
@@ -320,6 +341,8 @@ mod tests {
                 workspace: None,
                 generate_identity_files: true,
                 exec_policy: None,
+                tool_allowlist: vec![],
+                tool_blocklist: vec![],
             },
             state: AgentState::Created,
             mode: AgentMode::default(),

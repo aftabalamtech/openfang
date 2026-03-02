@@ -5799,6 +5799,92 @@ pub async fn set_model(
     }
 }
 
+/// GET /api/agents/{id}/tools — Get an agent's tool allowlist/blocklist.
+pub async fn get_agent_tools(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let agent_id: AgentId = match id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid agent ID"})),
+            )
+        }
+    };
+    let entry = match state.kernel.registry.get(agent_id) {
+        Some(e) => e,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent not found"})),
+            )
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "tool_allowlist": entry.manifest.tool_allowlist,
+            "tool_blocklist": entry.manifest.tool_blocklist,
+        })),
+    )
+}
+
+/// PUT /api/agents/{id}/tools — Update an agent's tool allowlist/blocklist.
+pub async fn set_agent_tools(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let agent_id: AgentId = match id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid agent ID"})),
+            )
+        }
+    };
+    let allowlist = body
+        .get("tool_allowlist")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
+    let blocklist = body
+        .get("tool_blocklist")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
+
+    if allowlist.is_none() && blocklist.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Provide 'tool_allowlist' and/or 'tool_blocklist'"})),
+        );
+    }
+
+    match state
+        .kernel
+        .set_agent_tool_filters(agent_id, allowlist, blocklist)
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "ok"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("{e}")})),
+        ),
+    }
+}
+
 // ── Per-Agent Skill & MCP Endpoints ────────────────────────────────────
 
 /// GET /api/agents/{id}/skills — Get an agent's skill assignment info.
