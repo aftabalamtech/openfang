@@ -842,8 +842,10 @@ impl OpenFangKernel {
             }
         }
 
-        // Initialize execution approval manager
-        let approval_manager = crate::approval::ApprovalManager::new(config.approval.clone());
+        // Initialize execution approval manager — apply shorthands (auto_approve clears list)
+        let mut approval_policy = config.approval.clone();
+        approval_policy.apply_shorthands();
+        let approval_manager = crate::approval::ApprovalManager::new(approval_policy);
 
         // Initialize binding/broadcast/auto-reply from config
         let initial_bindings = config.bindings.clone();
