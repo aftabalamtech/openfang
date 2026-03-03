@@ -1054,6 +1054,33 @@ impl OpenFangKernel {
             }
         }
 
+        // If no agents exist (fresh install), spawn a default assistant
+        if kernel.registry.list().is_empty() {
+            info!("No agents found — spawning default assistant");
+            let dm = &kernel.config.default_model;
+            let manifest = AgentManifest {
+                name: "assistant".to_string(),
+                description: "General-purpose assistant".to_string(),
+                model: openfang_types::agent::ModelConfig {
+                    provider: dm.provider.clone(),
+                    model: dm.model.clone(),
+                    system_prompt: "You are a helpful AI assistant.".to_string(),
+                    api_key_env: if dm.api_key_env.is_empty() {
+                        None
+                    } else {
+                        Some(dm.api_key_env.clone())
+                    },
+                    base_url: dm.base_url.clone(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            match kernel.spawn_agent(manifest) {
+                Ok(id) => info!(id = %id, "Default assistant spawned"),
+                Err(e) => warn!("Failed to spawn default assistant: {e}"),
+            }
+        }
+
         // Validate routing configs against model catalog
         for entry in kernel.registry.list() {
             if let Some(ref routing_config) = entry.manifest.routing {
@@ -2089,7 +2116,16 @@ impl OpenFangKernel {
                 routed_model = %routed_model,
                 "Model routing applied"
             );
-            manifest.model.model = routed_model;
+            manifest.model.model = routed_model.clone();
+            // Also update provider if the routed model belongs to a different provider
+            if let Ok(cat) = self.model_catalog.read() {
+                if let Some(entry) = cat.find_model(&routed_model) {
+                    if entry.provider != manifest.model.provider {
+                        info!(old = %manifest.model.provider, new = %entry.provider, "Model routing changed provider");
+                        manifest.model.provider = entry.provider.clone();
+                    }
+                }
+            }
         }
 
         let driver = self.resolve_driver(&manifest)?;
@@ -2921,6 +2957,13 @@ impl OpenFangKernel {
                 "{}\n\n---\n\n## Reference Knowledge\n\n{}",
                 manifest.model.system_prompt, skill_content
             );
+        }
+
+        // If an agent with this hand's name already exists, remove it first
+        let existing = self.registry.list().into_iter().find(|e| e.name == def.agent.name);
+        if let Some(old) = existing {
+            info!(agent = %old.name, id = %old.id, "Removing existing hand agent for reactivation");
+            let _ = self.kill_agent(old.id);
         }
 
         // Spawn the agent
