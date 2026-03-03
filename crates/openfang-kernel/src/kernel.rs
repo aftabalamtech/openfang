@@ -131,6 +131,8 @@ pub struct OpenFangKernel {
     pub whatsapp_gateway_pid: Arc<std::sync::Mutex<Option<u32>>>,
     /// Channel adapters registered at bridge startup (for proactive `channel_send` tool).
     pub channel_adapters: dashmap::DashMap<String, Arc<dyn openfang_channels::types::ChannelAdapter>>,
+    /// Hot-reloadable default model override (set via config hot-reload, read at agent spawn).
+    pub default_model_override: std::sync::RwLock<Option<openfang_types::config::DefaultModelConfig>>,
     /// Weak self-reference for trigger dispatch (set after Arc wrapping).
     self_handle: OnceLock<Weak<OpenFangKernel>>,
 }
@@ -530,7 +532,11 @@ impl OpenFangKernel {
         let driver_config = DriverConfig {
             provider: config.default_model.provider.clone(),
             api_key: std::env::var(&config.default_model.api_key_env).ok(),
-            base_url: config.default_model.base_url.clone(),
+            base_url: config
+                .default_model
+                .base_url
+                .clone()
+                .or_else(|| config.provider_urls.get(&config.default_model.provider).cloned()),
         };
         let primary_driver = drivers::create_driver(&driver_config)
             .map_err(|e| KernelError::BootFailed(format!("LLM driver init failed: {e}")))?;
@@ -546,7 +552,10 @@ impl OpenFangKernel {
                     } else {
                         std::env::var(&fb.api_key_env).ok()
                     },
-                    base_url: fb.base_url.clone(),
+                    base_url: fb
+                        .base_url
+                        .clone()
+                        .or_else(|| config.provider_urls.get(&fb.provider).cloned()),
                 };
                 match drivers::create_driver(&fb_config) {
                     Ok(d) => {
@@ -883,6 +892,7 @@ impl OpenFangKernel {
             booted_at: std::time::Instant::now(),
             whatsapp_gateway_pid: Arc::new(std::sync::Mutex::new(None)),
             channel_adapters: dashmap::DashMap::new(),
+            default_model_override: std::sync::RwLock::new(None),
             self_handle: OnceLock::new(),
         };
 
@@ -893,6 +903,61 @@ impl OpenFangKernel {
                 for entry in agents {
                     let agent_id = entry.id;
                     let name = entry.name.clone();
+
+                    // Check if TOML on disk is newer/different — if so, update from file
+                    let mut entry = entry;
+                    let toml_path = kernel
+                        .config
+                        .home_dir
+                        .join("agents")
+                        .join(&name)
+                        .join("agent.toml");
+                    if toml_path.exists() {
+                        match std::fs::read_to_string(&toml_path) {
+                            Ok(toml_str) => {
+                                match toml::from_str::<openfang_types::agent::AgentManifest>(
+                                    &toml_str,
+                                ) {
+                                    Ok(disk_manifest) => {
+                                        // Compare key fields to detect changes
+                                        let changed = disk_manifest.name != entry.manifest.name
+                                            || disk_manifest.description != entry.manifest.description
+                                            || disk_manifest.model.system_prompt != entry.manifest.model.system_prompt
+                                            || disk_manifest.model.provider != entry.manifest.model.provider
+                                            || disk_manifest.model.model != entry.manifest.model.model
+                                            || disk_manifest.capabilities.tools != entry.manifest.capabilities.tools;
+                                        if changed {
+                                            info!(
+                                                agent = %name,
+                                                "Agent TOML on disk differs from DB, updating"
+                                            );
+                                            entry.manifest = disk_manifest;
+                                            // Persist the update back to DB
+                                            if let Err(e) = kernel.memory.save_agent(&entry) {
+                                                warn!(
+                                                    agent = %name,
+                                                    "Failed to persist TOML update: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            agent = %name,
+                                            path = %toml_path.display(),
+                                            "Invalid agent TOML on disk, using DB version: {e}"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    agent = %name,
+                                    "Failed to read agent TOML: {e}"
+                                );
+                            }
+                        }
+                    }
 
                     // Re-grant capabilities
                     let caps = manifest_to_capabilities(&entry.manifest);
@@ -924,14 +989,18 @@ impl OpenFangKernel {
                         && restored_entry.manifest.model.base_url.is_none()
                     {
                         let dm = &kernel.config.default_model;
-                        if !dm.provider.is_empty() {
-                            restored_entry.manifest.model.provider = dm.provider.clone();
-                        }
-                        if !dm.model.is_empty() {
-                            restored_entry.manifest.model.model = dm.model.clone();
-                        }
-                        if dm.base_url.is_some() {
-                            restored_entry.manifest.model.base_url = dm.base_url.clone();
+                        let is_default_provider = restored_entry.manifest.model.provider.is_empty();
+                        let is_default_model = restored_entry.manifest.model.model.is_empty();
+                        if is_default_provider && is_default_model {
+                            if !dm.provider.is_empty() {
+                                restored_entry.manifest.model.provider = dm.provider.clone();
+                            }
+                            if !dm.model.is_empty() {
+                                restored_entry.manifest.model.model = dm.model.clone();
+                            }
+                            if dm.base_url.is_some() {
+                                restored_entry.manifest.model.base_url = dm.base_url.clone();
+                            }
                         }
                     }
 
@@ -998,18 +1067,30 @@ impl OpenFangKernel {
         }
         info!(agent = %name, id = %agent_id, exec_mode = ?manifest.exec_policy.as_ref().map(|p| &p.mode), "Agent exec_policy resolved");
 
-        // Overlay kernel default_model onto agent if no custom key/url is set.
-        // This ensures agents respect the user's configured provider from `openfang init`.
+        // Overlay kernel default_model onto agent if agent didn't explicitly choose.
+        // Only override when the agent has empty (unset) provider/model fields.
+        // This preserves explicit model choices like provider="groq", model="llama-3.3-70b".
         if manifest.model.api_key_env.is_none() && manifest.model.base_url.is_none() {
-            let dm = &self.config.default_model;
-            if !dm.provider.is_empty() {
-                manifest.model.provider = dm.provider.clone();
-            }
-            if !dm.model.is_empty() {
-                manifest.model.model = dm.model.clone();
-            }
-            if dm.base_url.is_some() {
-                manifest.model.base_url = dm.base_url.clone();
+            // Check hot-reloaded override first, fall back to boot-time config
+            let override_guard = self
+                .default_model_override
+                .read()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            let dm = override_guard
+                .as_ref()
+                .unwrap_or(&self.config.default_model);
+            let is_default_provider = manifest.model.provider.is_empty();
+            let is_default_model = manifest.model.model.is_empty();
+            if is_default_provider && is_default_model {
+                if !dm.provider.is_empty() {
+                    manifest.model.provider = dm.provider.clone();
+                }
+                if !dm.model.is_empty() {
+                    manifest.model.model = dm.model.clone();
+                }
+                if dm.base_url.is_some() {
+                    manifest.model.base_url = dm.base_url.clone();
+                }
             }
         }
 
@@ -1448,6 +1529,7 @@ impl OpenFangKernel {
                     None
                 },
                 peer_agents,
+                current_date: Some(chrono::Local::now().format("%A, %B %d, %Y (%Y-%m-%d %H:%M %Z)").to_string()),
             };
             manifest.model.system_prompt =
                 openfang_runtime::prompt_builder::build_system_prompt(&prompt_ctx);
@@ -1916,6 +1998,7 @@ impl OpenFangKernel {
                     None
                 },
                 peer_agents,
+                current_date: Some(chrono::Local::now().format("%A, %B %d, %Y (%Y-%m-%d %H:%M %Z)").to_string()),
             };
             manifest.model.system_prompt =
                 openfang_runtime::prompt_builder::build_system_prompt(&prompt_ctx);
@@ -2937,6 +3020,17 @@ impl OpenFangKernel {
                         .unwrap_or_else(|e| e.into_inner());
                     catalog.apply_url_overrides(&new_config.provider_urls);
                 }
+                HotAction::UpdateDefaultModel => {
+                    info!(
+                        "Hot-reload: updating default model to {}/{}",
+                        new_config.default_model.provider, new_config.default_model.model
+                    );
+                    let mut guard = self
+                        .default_model_override
+                        .write()
+                        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                    *guard = Some(new_config.default_model.clone());
+                }
                 _ => {
                     // Other hot actions (channels, web, browser, extensions, etc.)
                     // are logged but not applied here — they require subsystem-specific
@@ -3091,18 +3185,30 @@ impl OpenFangKernel {
     /// `Continuous`, `Periodic`, or `Proactive` schedules.
     pub fn start_background_agents(self: &Arc<Self>) {
         let agents = self.registry.list();
-        let mut started = 0u32;
+        let mut bg_agents: Vec<(openfang_types::agent::AgentId, String, ScheduleMode)> =
+            Vec::new();
 
         for entry in &agents {
             if matches!(entry.manifest.schedule, ScheduleMode::Reactive) {
                 continue;
             }
-            self.start_background_for_agent(entry.id, &entry.name, &entry.manifest.schedule);
-            started += 1;
+            bg_agents.push((entry.id, entry.name.clone(), entry.manifest.schedule.clone()));
         }
 
-        if started > 0 {
-            info!("Started {started} background agent loop(s)");
+        if !bg_agents.is_empty() {
+            let count = bg_agents.len();
+            let kernel = Arc::clone(self);
+            // Stagger agent startup to prevent rate-limit storm on shared providers.
+            // Each agent gets a 500ms delay before the next one starts.
+            tokio::spawn(async move {
+                for (i, (id, name, schedule)) in bg_agents.into_iter().enumerate() {
+                    kernel.start_background_for_agent(id, &name, &schedule);
+                    if i > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                }
+                info!("Started {count} background agent loop(s) (staggered)");
+            });
         }
 
         // Start heartbeat monitor for agent health checking
@@ -3293,9 +3399,10 @@ impl OpenFangKernel {
                                 let timeout_s = timeout_secs.unwrap_or(120);
                                 let timeout = std::time::Duration::from_secs(timeout_s);
                                 let delivery = job.delivery.clone();
+                                let kh: std::sync::Arc<dyn openfang_runtime::kernel_handle::KernelHandle> = kernel.clone();
                                 match tokio::time::timeout(
                                     timeout,
-                                    kernel.send_message(agent_id, message),
+                                    kernel.send_message_with_handle(agent_id, message, Some(kh)),
                                 )
                                 .await
                                 {
@@ -3663,10 +3770,14 @@ impl OpenFangKernel {
             let base_url = if has_custom_url {
                 manifest.model.base_url.clone()
             } else if agent_provider == default_provider {
-                self.config.default_model.base_url.clone()
+                self.config
+                    .default_model
+                    .base_url
+                    .clone()
+                    .or_else(|| self.config.provider_urls.get(agent_provider.as_str()).cloned())
             } else {
-                // Let create_driver() use the target provider's default base URL
-                None
+                // Check provider_urls before falling back to hardcoded defaults
+                self.config.provider_urls.get(agent_provider.as_str()).cloned()
             };
 
             let driver_config = DriverConfig {
@@ -3682,7 +3793,9 @@ impl OpenFangKernel {
 
         // If fallback models are configured, wrap in FallbackDriver
         if !manifest.fallback_models.is_empty() {
-            let mut chain = vec![primary.clone()];
+            // Primary driver uses the agent's own model name (already set in request)
+            let mut chain: Vec<(std::sync::Arc<dyn openfang_runtime::llm_driver::LlmDriver>, String)> =
+                vec![(primary.clone(), String::new())];
             for fb in &manifest.fallback_models {
                 let config = DriverConfig {
                     provider: fb.provider.clone(),
@@ -3690,10 +3803,13 @@ impl OpenFangKernel {
                         .api_key_env
                         .as_ref()
                         .and_then(|env| std::env::var(env).ok()),
-                    base_url: fb.base_url.clone(),
+                    base_url: fb
+                        .base_url
+                        .clone()
+                        .or_else(|| self.config.provider_urls.get(&fb.provider).cloned()),
                 };
                 match drivers::create_driver(&config) {
-                    Ok(d) => chain.push(d),
+                    Ok(d) => chain.push((d, fb.model.clone())),
                     Err(e) => {
                         warn!("Fallback driver '{}' failed to init: {e}", fb.provider);
                     }
@@ -3701,7 +3817,7 @@ impl OpenFangKernel {
             }
             if chain.len() > 1 {
                 return Ok(Arc::new(
-                    openfang_runtime::drivers::fallback::FallbackDriver::new(chain),
+                    openfang_runtime::drivers::fallback::FallbackDriver::with_models(chain),
                 ));
             }
         }

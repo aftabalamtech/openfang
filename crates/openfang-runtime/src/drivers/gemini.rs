@@ -525,10 +525,10 @@ impl LlmDriver for GeminiDriver {
                     let event_text = buffer[..pos].to_string();
                     buffer = buffer[pos + 2..].to_string();
 
-                    // Extract the data line
+                    // Extract the data line (handle both "data: " and "data:" formats)
                     let data = event_text
                         .lines()
-                        .find_map(|line| line.strip_prefix("data: "))
+                        .find_map(|line| line.strip_prefix("data:").map(|d| d.trim_start()))
                         .unwrap_or("");
 
                     if data.is_empty() {

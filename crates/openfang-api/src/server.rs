@@ -49,6 +49,7 @@ pub async fn build_router(
         bridge_manager: tokio::sync::Mutex::new(bridge),
         channels_config: tokio::sync::RwLock::new(channels_config),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        clawhub_cache: dashmap::DashMap::new(),
     });
 
     // CORS: allow localhost origins by default. If API key is set, the API
@@ -319,6 +320,10 @@ pub async fn build_router(
         .route(
             "/api/clawhub/skill/{slug}",
             axum::routing::get(routes::clawhub_skill_detail),
+        )
+        .route(
+            "/api/clawhub/skill/{slug}/code",
+            axum::routing::get(routes::clawhub_skill_code),
         )
         .route(
             "/api/clawhub/install",
