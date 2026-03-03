@@ -38,6 +38,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, Weak};
 use tracing::{debug, info, warn};
 
+/// Shared HTTP clients — avoids creating 60+ independent connection pools.
+///
+/// `reqwest::Client` is `Arc`-wrapped internally, so `.clone()` is cheap.
+pub struct SharedHttpClients {
+    /// General-purpose client (30s timeout) — API calls, LLM drivers, channel adapters.
+    pub default: reqwest::Client,
+    /// Long-lived streaming client (no timeout) — SSE, WebSocket polling.
+    pub streaming: reqwest::Client,
+}
+
 /// The main OpenFang kernel — coordinates all subsystems.
 pub struct OpenFangKernel {
     /// Kernel configuration.
@@ -122,17 +132,23 @@ pub struct OpenFangKernel {
     /// Persistent process manager for interactive sessions (REPLs, servers).
     pub process_manager: Arc<openfang_runtime::process_manager::ProcessManager>,
     /// OFP peer registry — tracks connected peers.
-    pub peer_registry: Option<openfang_wire::PeerRegistry>,
+    pub peer_registry: OnceLock<openfang_wire::PeerRegistry>,
     /// OFP peer node — the local networking node.
-    pub peer_node: Option<Arc<openfang_wire::PeerNode>>,
+    pub peer_node: OnceLock<Arc<openfang_wire::PeerNode>>,
     /// Boot timestamp for uptime calculation.
     pub booted_at: std::time::Instant,
     /// WhatsApp Web gateway child process PID (for shutdown cleanup).
     pub whatsapp_gateway_pid: Arc<std::sync::Mutex<Option<u32>>>,
+    /// WhatsApp gateway health state (updated by periodic health monitor loop).
+    pub whatsapp_gateway_health: Arc<std::sync::RwLock<Option<crate::whatsapp_gateway::WhatsAppGatewayHealth>>>,
     /// Channel adapters registered at bridge startup (for proactive `channel_send` tool).
     pub channel_adapters: dashmap::DashMap<String, Arc<dyn openfang_channels::types::ChannelAdapter>>,
     /// Hot-reloadable default model override (set via config hot-reload, read at agent spawn).
     pub default_model_override: std::sync::RwLock<Option<openfang_types::config::DefaultModelConfig>>,
+    /// Encrypted credential vault (AES-256-GCM, OS keyring key management).
+    pub vault: Arc<std::sync::RwLock<Option<openfang_extensions::vault::CredentialVault>>>,
+    /// Shared HTTP clients (avoids 60+ independent connection pools).
+    pub http_clients: SharedHttpClients,
     /// Weak self-reference for trigger dispatch (set after Arc wrapping).
     self_handle: OnceLock<Weak<OpenFangKernel>>,
 }
@@ -528,6 +544,21 @@ impl OpenFangKernel {
                 .map_err(|e| KernelError::BootFailed(format!("Memory init failed: {e}")))?,
         );
 
+        // Build shared HTTP clients once — reused by all drivers, adapters, and tools.
+        // LLM calls can take 60-120s (especially via local proxies or complex tool-use),
+        // so the default timeout must accommodate slower providers.
+        let shared_http_clients = SharedHttpClients {
+            default: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .pool_max_idle_per_host(20)
+                .build()
+                .expect("Failed to build default HTTP client"),
+            streaming: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(0))
+                .build()
+                .expect("Failed to build streaming HTTP client"),
+        };
+
         // Create LLM driver
         let driver_config = DriverConfig {
             provider: config.default_model.provider.clone(),
@@ -538,7 +569,7 @@ impl OpenFangKernel {
                 .clone()
                 .or_else(|| config.provider_urls.get(&config.default_model.provider).cloned()),
         };
-        let primary_driver = drivers::create_driver(&driver_config)
+        let primary_driver = drivers::create_driver(&driver_config, shared_http_clients.default.clone())
             .map_err(|e| KernelError::BootFailed(format!("LLM driver init failed: {e}")))?;
 
         // If fallback providers are configured, wrap the primary driver in a FallbackDriver
@@ -557,7 +588,7 @@ impl OpenFangKernel {
                         .clone()
                         .or_else(|| config.provider_urls.get(&fb.provider).cloned()),
                 };
-                match drivers::create_driver(&fb_config) {
+                match drivers::create_driver(&fb_config, shared_http_clients.default.clone()) {
                     Ok(d) => {
                         info!(
                             provider = %fb.provider,
@@ -710,10 +741,12 @@ impl OpenFangKernel {
             search: openfang_runtime::web_search::WebSearchEngine::new(
                 config.web.clone(),
                 web_cache.clone(),
+                shared_http_clients.default.clone(),
             ),
             fetch: openfang_runtime::web_fetch::WebFetchEngine::new(
                 config.web.fetch.clone(),
                 web_cache,
+                shared_http_clients.default.clone(),
             ),
         };
 
@@ -725,7 +758,7 @@ impl OpenFangKernel {
             if let Some(ref provider) = config.memory.embedding_provider {
                 // Explicit config takes priority
                 let api_key_env = config.memory.embedding_api_key_env.as_deref().unwrap_or("");
-                match create_embedding_driver(provider, "text-embedding-3-small", api_key_env) {
+                match create_embedding_driver(provider, "text-embedding-3-small", api_key_env, shared_http_clients.default.clone()) {
                     Ok(d) => {
                         info!(provider = %provider, "Embedding driver configured from memory config");
                         Some(Arc::from(d))
@@ -736,7 +769,7 @@ impl OpenFangKernel {
                     }
                 }
             } else if std::env::var("OPENAI_API_KEY").is_ok() {
-                match create_embedding_driver("openai", "text-embedding-3-small", "OPENAI_API_KEY")
+                match create_embedding_driver("openai", "text-embedding-3-small", "OPENAI_API_KEY", shared_http_clients.default.clone())
                 {
                     Ok(d) => {
                         info!("Embedding driver auto-detected: OpenAI");
@@ -749,7 +782,7 @@ impl OpenFangKernel {
                 }
             } else {
                 // Try Ollama (local, no key needed)
-                match create_embedding_driver("ollama", "nomic-embed-text", "") {
+                match create_embedding_driver("ollama", "nomic-embed-text", "", shared_http_clients.default.clone()) {
                     Ok(d) => {
                         info!("Embedding driver auto-detected: Ollama (local)");
                         Some(Arc::from(d))
@@ -766,9 +799,9 @@ impl OpenFangKernel {
 
         // Initialize media understanding engine
         let media_engine =
-            openfang_runtime::media_understanding::MediaEngine::new(config.media.clone());
-        let tts_engine = openfang_runtime::tts::TtsEngine::new(config.tts.clone());
-        let mut pairing = crate::pairing::PairingManager::new(config.pairing.clone());
+            openfang_runtime::media_understanding::MediaEngine::new(config.media.clone(), shared_http_clients.default.clone());
+        let tts_engine = openfang_runtime::tts::TtsEngine::new(config.tts.clone(), shared_http_clients.default.clone());
+        let mut pairing = crate::pairing::PairingManager::new(config.pairing.clone(), shared_http_clients.default.clone());
 
         // Load paired devices from database and set up persistence callback
         if config.pairing.enabled {
@@ -838,13 +871,16 @@ impl OpenFangKernel {
             }
         }
 
-        // Initialize execution approval manager
-        let approval_manager = crate::approval::ApprovalManager::new(config.approval.clone());
+        // Initialize execution approval manager — apply shorthands (auto_approve clears list)
+        let mut approval_policy = config.approval.clone();
+        approval_policy.apply_shorthands();
+        let approval_manager = crate::approval::ApprovalManager::new(approval_policy);
 
         // Initialize binding/broadcast/auto-reply from config
         let initial_bindings = config.bindings.clone();
         let initial_broadcast = config.broadcast.clone();
         let auto_reply_engine = crate::auto_reply::AutoReplyEngine::new(config.auto_reply.clone());
+        let workflows_path = config.home_dir.join("workflows.json");
 
         let kernel = Self {
             config,
@@ -854,7 +890,7 @@ impl OpenFangKernel {
             scheduler: AgentScheduler::new(),
             memory: memory.clone(),
             supervisor,
-            workflows: WorkflowEngine::new(),
+            workflows: WorkflowEngine::with_persistence(workflows_path),
             triggers: TriggerEngine::new(),
             background,
             audit_log: Arc::new(AuditLog::new()),
@@ -887,14 +923,23 @@ impl OpenFangKernel {
             auto_reply_engine,
             hooks: openfang_runtime::hooks::HookRegistry::new(),
             process_manager: Arc::new(openfang_runtime::process_manager::ProcessManager::new(5)),
-            peer_registry: None,
-            peer_node: None,
+            peer_registry: OnceLock::new(),
+            peer_node: OnceLock::new(),
             booted_at: std::time::Instant::now(),
             whatsapp_gateway_pid: Arc::new(std::sync::Mutex::new(None)),
+            whatsapp_gateway_health: Arc::new(std::sync::RwLock::new(None)),
             channel_adapters: dashmap::DashMap::new(),
             default_model_override: std::sync::RwLock::new(None),
+            vault: Arc::new(std::sync::RwLock::new(None)),
+            http_clients: shared_http_clients,
             self_handle: OnceLock::new(),
         };
+
+        // Initialize credential vault (decrypt secrets, migrate from secrets.env)
+        kernel.init_vault();
+
+        // Load persisted workflows from ~/.openfang/workflows.json
+        kernel.workflows.load_persisted_sync();
 
         // Restore persisted agents from SQLite
         match kernel.memory.load_all_agents() {
@@ -1019,6 +1064,29 @@ impl OpenFangKernel {
             }
         }
 
+        // Reconcile restored agents with hand registry — mark hands as active
+        // if their agent was restored from SQLite.
+        {
+            let hand_defs: Vec<(String, String)> = kernel
+                .hand_registry
+                .list_definitions()
+                .iter()
+                .map(|d| (d.id.clone(), d.agent.name.clone()))
+                .collect();
+
+            for entry in kernel.registry.list() {
+                for (hand_id, hand_agent_name) in &hand_defs {
+                    if entry.name == *hand_agent_name {
+                        kernel.hand_registry.register_restored(
+                            hand_id,
+                            entry.id,
+                            &entry.name,
+                        );
+                    }
+                }
+            }
+        }
+
         // Validate routing configs against model catalog
         for entry in kernel.registry.list() {
             if let Some(ref routing_config) = entry.manifest.routing {
@@ -1036,6 +1104,86 @@ impl OpenFangKernel {
 
         info!("OpenFang kernel booted successfully");
         Ok(kernel)
+    }
+
+    /// Initialize the credential vault — auto-creates if needed, migrates from secrets.env.
+    ///
+    /// This is called once during boot, after dotenv loading but before agents start.
+    /// If the vault cannot be initialized or unlocked, the system continues working
+    /// with plaintext secrets in secrets.env (graceful degradation).
+    fn init_vault(&self) {
+        let vault_path = self.config.home_dir.join("vault.enc");
+        let secrets_env_path = self.config.home_dir.join("secrets.env");
+
+        let mut vault = openfang_extensions::vault::CredentialVault::new(vault_path.clone());
+
+        // Initialize or unlock
+        if !vault.exists() {
+            // First time — create vault
+            if let Err(e) = vault.init() {
+                warn!("Could not initialize credential vault: {e}. Secrets will remain in plaintext.");
+                return;
+            }
+            info!("Credential vault created at {:?}", vault_path);
+        } else {
+            // Existing vault — try to unlock
+            if let Err(e) = vault.unlock() {
+                warn!("Could not unlock credential vault: {e}. Falling back to secrets.env.");
+                return;
+            }
+        }
+
+        // Migrate entries from secrets.env if it exists
+        if secrets_env_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&secrets_env_path) {
+                let mut migrated = 0u32;
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    if let Some(eq_pos) = trimmed.find('=') {
+                        let key = trimmed[..eq_pos].trim();
+                        let value = trimmed[eq_pos + 1..].trim();
+                        if !key.is_empty() && vault.get(key).is_none() {
+                            if let Err(e) = vault.set(
+                                key.to_string(),
+                                zeroize::Zeroizing::new(value.to_string()),
+                            ) {
+                                warn!("Failed to migrate secret {key} to vault: {e}");
+                            } else {
+                                migrated += 1;
+                            }
+                        }
+                    }
+                }
+                if migrated > 0 {
+                    info!("Migrated {migrated} secrets from secrets.env to encrypted vault");
+                    // Rename the old file so it's not used again
+                    let backup = secrets_env_path.with_extension("env.migrated");
+                    if let Err(e) = std::fs::rename(&secrets_env_path, &backup) {
+                        warn!("Could not rename secrets.env: {e}");
+                    }
+                }
+            }
+        }
+
+        // Load all vault secrets into process environment.
+        // SAFETY: env var mutation runs once at startup before any concurrent HTTP
+        // handlers are active, so there is no data race. We use `unsafe` to be
+        // explicit about the env mutation (mirrors routes.rs ENV_MUTEX pattern).
+        for key in vault.list_keys() {
+            if let Some(value) = vault.get(key) {
+                if std::env::var(key).is_err() {
+                    unsafe { std::env::set_var(key, value.as_str()); }
+                }
+            }
+        }
+
+        // Store in kernel
+        if let Ok(mut guard) = self.vault.write() {
+            *guard = Some(vault);
+        }
     }
 
     /// Spawn a new agent from a manifest, optionally linking to a parent agent.
@@ -2844,10 +2992,25 @@ impl OpenFangKernel {
                 manifest.model.system_prompt, resolved.prompt_block
             );
         }
-        if !resolved.env_vars.is_empty() {
+
+        // Collect env vars the agent's shell_exec sandbox should allow:
+        // 1) env vars from settings options (e.g. provider API keys from selected STT/TTS)
+        // 2) env vars from hand requirements (e.g. TWITTER_BEARER_TOKEN)
+        let mut allowed_env = resolved.env_vars;
+        for req in &def.requires {
+            if matches!(
+                req.requirement_type,
+                openfang_hands::RequirementType::ApiKey
+                    | openfang_hands::RequirementType::EnvVar
+            ) && !allowed_env.contains(&req.check_value)
+            {
+                allowed_env.push(req.check_value.clone());
+            }
+        }
+        if !allowed_env.is_empty() {
             manifest.metadata.insert(
                 "hand_allowed_env".to_string(),
-                serde_json::to_value(&resolved.env_vars).unwrap_or_default(),
+                serde_json::to_value(&allowed_env).unwrap_or_default(),
             );
         }
 
@@ -3241,7 +3404,7 @@ impl OpenFangKernel {
 
                 for (provider_id, base_url) in &local_providers {
                     let result =
-                        openfang_runtime::provider_health::probe_provider(provider_id, base_url)
+                        openfang_runtime::provider_health::probe_provider(provider_id, base_url, &kernel.http_clients.default)
                             .await;
                     if result.reachable {
                         info!(
@@ -3464,7 +3627,7 @@ impl OpenFangKernel {
                 let kernel = Arc::clone(self);
                 let agents = a2a_config.external_agents.clone();
                 tokio::spawn(async move {
-                    let discovered = openfang_runtime::a2a::discover_external_agents(&agents).await;
+                    let discovered = openfang_runtime::a2a::discover_external_agents(&agents, kernel.http_clients.default.clone()).await;
                     if let Ok(mut store) = kernel.a2a_external_agents.lock() {
                         *store = discovered;
                     }
@@ -3477,6 +3640,12 @@ impl OpenFangKernel {
             let kernel = Arc::clone(self);
             tokio::spawn(async move {
                 crate::whatsapp_gateway::start_whatsapp_gateway(&kernel).await;
+            });
+
+            // Start WhatsApp gateway health monitor (polls /health, triggers reconnect)
+            let kernel2 = Arc::clone(self);
+            tokio::spawn(async move {
+                crate::whatsapp_gateway::run_whatsapp_health_loop(&kernel2).await;
             });
         }
     }
@@ -3535,14 +3704,8 @@ impl OpenFangKernel {
                     "OFP peer node started"
                 );
 
-                // SAFETY: These fields are only written once during startup.
-                // We use unsafe to set them because start_background_agents runs
-                // after the Arc is created and the kernel is otherwise immutable.
-                let self_ptr = Arc::as_ptr(self) as *mut OpenFangKernel;
-                unsafe {
-                    (*self_ptr).peer_registry = Some(registry.clone());
-                    (*self_ptr).peer_node = Some(node.clone());
-                }
+                let _ = self.peer_registry.set(registry.clone());
+                let _ = self.peer_node.set(node.clone());
 
                 // Connect to bootstrap peers
                 for peer_addr_str in &self.config.network.bootstrap_peers {
@@ -3786,7 +3949,7 @@ impl OpenFangKernel {
                 base_url,
             };
 
-            drivers::create_driver(&driver_config).map_err(|e| {
+            drivers::create_driver(&driver_config, self.http_clients.default.clone()).map_err(|e| {
                 KernelError::BootFailed(format!("Agent LLM driver init failed: {e}"))
             })?
         };
@@ -3808,7 +3971,7 @@ impl OpenFangKernel {
                         .clone()
                         .or_else(|| self.config.provider_urls.get(&fb.provider).cloned()),
                 };
-                match drivers::create_driver(&config) {
+                match drivers::create_driver(&config, self.http_clients.default.clone()) {
                     Ok(d) => chain.push((d, fb.model.clone())),
                     Err(e) => {
                         warn!("Fallback driver '{}' failed to init: {e}", fb.provider);
@@ -3852,7 +4015,7 @@ impl OpenFangKernel {
                 env: server_config.env.clone(),
             };
 
-            match McpConnection::connect(mcp_config).await {
+            match McpConnection::connect(mcp_config, self.http_clients.default.clone()).await {
                 Ok(conn) => {
                     let tool_count = conn.tools().len();
                     // Cache tool definitions
@@ -3962,7 +4125,7 @@ impl OpenFangKernel {
 
             self.extension_health.register(&server_config.name);
 
-            match McpConnection::connect(mcp_config).await {
+            match McpConnection::connect(mcp_config, self.http_clients.default.clone()).await {
                 Ok(conn) => {
                     let tool_count = conn.tools().len();
                     if let Ok(mut tools) = self.mcp_tools.lock() {
@@ -4078,7 +4241,7 @@ impl OpenFangKernel {
             env: server_config.env.clone(),
         };
 
-        match McpConnection::connect(mcp_config).await {
+        match McpConnection::connect(mcp_config, self.http_clients.default.clone()).await {
             Ok(conn) => {
                 let tool_count = conn.tools().len();
                 if let Ok(mut tools) = self.mcp_tools.lock() {
@@ -4550,8 +4713,8 @@ fn infer_provider_from_model(model: &str) -> Option<String> {
             "minimax" | "gemini" | "anthropic" | "openai" | "groq" | "deepseek" | "mistral"
             | "cohere" | "xai" | "ollama" | "together" | "fireworks" | "perplexity"
             | "cerebras" | "sambanova" | "replicate" | "huggingface" | "ai21" | "codex"
-            | "claude-code" | "copilot" | "github-copilot" | "qwen" | "zhipu" | "moonshot"
-            | "openrouter" => {
+            | "claude-code" | "claude-code-proxy" | "copilot" | "github-copilot" | "qwen"
+            | "zhipu" | "moonshot" | "openrouter" => {
                 if model.contains('/') {
                     return Some(prefix.to_string());
                 }

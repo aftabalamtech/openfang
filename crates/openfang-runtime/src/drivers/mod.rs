@@ -13,12 +13,13 @@ pub mod openai;
 
 use crate::llm_driver::{DriverConfig, LlmDriver, LlmError};
 use openfang_types::model_catalog::{
-    AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, COHERE_BASE_URL, DEEPSEEK_BASE_URL,
-    FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL, LMSTUDIO_BASE_URL,
-    MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL, OPENAI_BASE_URL,
-    OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
-    REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL,
-    ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
+    AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, CLAUDE_CODE_PROXY_BASE_URL,
+    COHERE_BASE_URL, DEEPSEEK_BASE_URL, FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL,
+    HUGGINGFACE_BASE_URL, LMSTUDIO_BASE_URL, MINIMAX_BASE_URL, MISTRAL_BASE_URL,
+    MOONSHOT_BASE_URL, OLLAMA_BASE_URL, OPENAI_BASE_URL, OPENROUTER_BASE_URL,
+    PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL, REPLICATE_BASE_URL,
+    SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL, ZHIPU_BASE_URL,
+    ZHIPU_CODING_BASE_URL,
 };
 use std::sync::Arc;
 
@@ -143,6 +144,11 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
             api_key_env: "",
             key_required: false,
         }),
+        "claude-code-proxy" => Some(ProviderDefaults {
+            base_url: CLAUDE_CODE_PROXY_BASE_URL,
+            api_key_env: "",
+            key_required: false,
+        }),
         "moonshot" | "kimi" => Some(ProviderDefaults {
             base_url: MOONSHOT_BASE_URL,
             api_key_env: "MOONSHOT_API_KEY",
@@ -200,7 +206,7 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
 /// - `xai` — xAI (Grok)
 /// - `replicate` — Replicate
 /// - Any custom provider with `base_url` set uses OpenAI-compatible format
-pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmError> {
+pub fn create_driver(config: &DriverConfig, client: reqwest::Client) -> Result<Arc<dyn LlmDriver>, LlmError> {
     let provider = config.provider.as_str();
 
     // Anthropic uses a different API format — special case
@@ -216,7 +222,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .base_url
             .clone()
             .unwrap_or_else(|| ANTHROPIC_BASE_URL.to_string());
-        return Ok(Arc::new(anthropic::AnthropicDriver::new(api_key, base_url)));
+        return Ok(Arc::new(anthropic::AnthropicDriver::new(api_key, base_url, client)));
     }
 
     // Gemini uses a different API format — special case
@@ -235,7 +241,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .base_url
             .clone()
             .unwrap_or_else(|| GEMINI_BASE_URL.to_string());
-        return Ok(Arc::new(gemini::GeminiDriver::new(api_key, base_url)));
+        return Ok(Arc::new(gemini::GeminiDriver::new(api_key, base_url, client)));
     }
 
     // Codex — reuses OpenAI driver with credential sync from Codex CLI
@@ -254,13 +260,28 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .base_url
             .clone()
             .unwrap_or_else(|| OPENAI_BASE_URL.to_string());
-        return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url)));
+        return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url, client)));
     }
 
     // Claude Code CLI — subprocess-based, no API key needed
     if provider == "claude-code" {
         let cli_path = config.base_url.clone();
         return Ok(Arc::new(claude_code::ClaudeCodeDriver::new(cli_path)));
+    }
+
+    // Claude Code Proxy — Anthropic Messages API via local Agent SDK proxy
+    if provider == "claude-code-proxy" {
+        let api_key = config
+            .api_key
+            .clone()
+            .unwrap_or_else(|| "not-needed".to_string());
+        let base_url = config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| CLAUDE_CODE_PROXY_BASE_URL.to_string());
+        return Ok(Arc::new(anthropic::AnthropicDriver::new(
+            api_key, base_url, client,
+        )));
     }
 
     // GitHub Copilot — wraps OpenAI-compatible driver with automatic token exchange.
@@ -283,6 +304,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         return Ok(Arc::new(copilot::CopilotDriver::new(
             github_token,
             base_url,
+            client,
         )));
     }
 
@@ -306,7 +328,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             .clone()
             .unwrap_or_else(|| defaults.base_url.to_string());
 
-        return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url)));
+        return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url, client)));
     }
 
     // Unknown provider — if base_url is set, treat as custom OpenAI-compatible
@@ -315,6 +337,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         return Ok(Arc::new(openai::OpenAIDriver::new(
             api_key,
             base_url.clone(),
+            client,
         )));
     }
 
@@ -362,6 +385,7 @@ pub fn known_providers() -> &'static [&'static str] {
         "qianfan",
         "codex",
         "claude-code",
+        "claude-code-proxy",
     ]
 }
 
@@ -402,7 +426,7 @@ mod tests {
             api_key: Some("test".to_string()),
             base_url: Some("http://localhost:9999/v1".to_string()),
         };
-        let driver = create_driver(&config);
+        let driver = create_driver(&config, reqwest::Client::new());
         assert!(driver.is_ok());
     }
 
@@ -413,7 +437,7 @@ mod tests {
             api_key: None,
             base_url: None,
         };
-        let driver = create_driver(&config);
+        let driver = create_driver(&config, reqwest::Client::new());
         assert!(driver.is_err());
     }
 
@@ -457,7 +481,8 @@ mod tests {
         assert!(providers.contains(&"qianfan"));
         assert!(providers.contains(&"codex"));
         assert!(providers.contains(&"claude-code"));
-        assert_eq!(providers.len(), 29);
+        assert!(providers.contains(&"claude-code-proxy"));
+        assert_eq!(providers.len(), 30);
     }
 
     #[test]
