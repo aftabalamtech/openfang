@@ -3623,17 +3623,36 @@ pub async fn activate_hand(
     let config = body.map(|b| b.0.config).unwrap_or_default();
 
     match state.kernel.activate_hand(&hand_id, config) {
-        Ok(instance) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "instance_id": instance.instance_id,
-                "hand_id": instance.hand_id,
-                "status": format!("{}", instance.status),
-                "agent_id": instance.agent_id.map(|a| a.to_string()),
-                "agent_name": instance.agent_name,
-                "activated_at": instance.activated_at.to_rfc3339(),
-            })),
-        ),
+        Ok(instance) => {
+            // If the hand agent has a non-reactive schedule (autonomous hands),
+            // start its background loop so it begins running immediately.
+            if let Some(agent_id) = instance.agent_id {
+                let entry = state.kernel.registry.list().into_iter().find(|e| e.id == agent_id);
+                if let Some(entry) = entry {
+                    if !matches!(
+                        entry.manifest.schedule,
+                        openfang_types::agent::ScheduleMode::Reactive
+                    ) {
+                        state.kernel.start_background_for_agent(
+                            agent_id,
+                            &entry.name,
+                            &entry.manifest.schedule,
+                        );
+                    }
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "instance_id": instance.instance_id,
+                    "hand_id": instance.hand_id,
+                    "status": format!("{}", instance.status),
+                    "agent_id": instance.agent_id.map(|a| a.to_string()),
+                    "agent_name": instance.agent_name,
+                    "activated_at": instance.activated_at.to_rfc3339(),
+                })),
+            )
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": format!("{e}")})),
@@ -8759,7 +8778,9 @@ fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
     match value {
         serde_json::Value::String(s) => toml::Value::String(s.clone()),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
+            if let Some(i) = n.as_u64() {
+                toml::Value::Integer(i as i64)
+            } else if let Some(i) = n.as_i64() {
                 toml::Value::Integer(i)
             } else if let Some(f) = n.as_f64() {
                 toml::Value::Float(f)

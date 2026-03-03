@@ -4380,8 +4380,9 @@ fn cmd_config_set(key: &str, value: &str) {
     let new_value = if let Some(existing) = tbl.get(last_key) {
         match existing {
             toml::Value::Integer(_) => value
-                .parse::<i64>()
-                .map(toml::Value::Integer)
+                .parse::<u64>()
+                .map(|v| toml::Value::Integer(v as i64))
+                .or_else(|_| value.parse::<i64>().map(toml::Value::Integer))
                 .unwrap_or_else(|_| toml::Value::String(value.to_string())),
             toml::Value::Float(_) => value
                 .parse::<f64>()
@@ -4394,7 +4395,18 @@ fn cmd_config_set(key: &str, value: &str) {
             _ => toml::Value::String(value.to_string()),
         }
     } else {
-        toml::Value::String(value.to_string())
+        // No existing value — infer type from the string content
+        if let Ok(b) = value.parse::<bool>() {
+            toml::Value::Boolean(b)
+        } else if let Ok(i) = value.parse::<u64>() {
+            toml::Value::Integer(i as i64)
+        } else if let Ok(i) = value.parse::<i64>() {
+            toml::Value::Integer(i)
+        } else if let Ok(f) = value.parse::<f64>() {
+            toml::Value::Float(f)
+        } else {
+            toml::Value::String(value.to_string())
+        }
     };
 
     tbl.insert(last_key.to_string(), new_value);

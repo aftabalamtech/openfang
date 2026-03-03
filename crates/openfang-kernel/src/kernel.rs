@@ -20,7 +20,9 @@ use openfang_runtime::agent_loop::{
 use openfang_runtime::audit::AuditLog;
 use openfang_runtime::drivers;
 use openfang_runtime::kernel_handle::{self, KernelHandle};
-use openfang_runtime::llm_driver::{CompletionRequest, DriverConfig, LlmDriver, StreamEvent};
+use openfang_runtime::llm_driver::{
+    CompletionRequest, CompletionResponse, DriverConfig, LlmDriver, LlmError, StreamEvent,
+};
 use openfang_runtime::python_runtime::{self, PythonConfig};
 use openfang_runtime::routing::ModelRouter;
 use openfang_runtime::sandbox::{SandboxConfig, WasmSandbox};
@@ -39,6 +41,21 @@ use std::sync::{Arc, OnceLock, Weak};
 use tracing::{debug, info, warn};
 
 /// The main OpenFang kernel — coordinates all subsystems.
+/// Stub LLM driver used when no providers are configured.
+/// Returns a helpful error so the dashboard still boots and users can configure providers.
+struct StubDriver;
+
+#[async_trait]
+impl LlmDriver for StubDriver {
+    async fn complete(&self, _request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
+        Err(LlmError::MissingApiKey(
+            "No LLM provider configured. Set an API key (e.g. GROQ_API_KEY) and restart, \
+             or configure a provider via the dashboard."
+                .to_string(),
+        ))
+    }
+}
+
 pub struct OpenFangKernel {
     /// Kernel configuration.
     pub config: KernelConfig,
@@ -538,52 +555,67 @@ impl OpenFangKernel {
                 .clone()
                 .or_else(|| config.provider_urls.get(&config.default_model.provider).cloned()),
         };
-        let primary_driver = drivers::create_driver(&driver_config)
-            .map_err(|e| KernelError::BootFailed(format!("LLM driver init failed: {e}")))?;
+        // Primary driver failure is non-fatal: the dashboard should remain accessible
+        // even if the LLM provider is misconfigured. Users can fix config via dashboard.
+        let primary_result = drivers::create_driver(&driver_config);
+        let mut driver_chain: Vec<Arc<dyn LlmDriver>> = Vec::new();
 
-        // If fallback providers are configured, wrap the primary driver in a FallbackDriver
-        let driver: Arc<dyn LlmDriver> = if !config.fallback_providers.is_empty() {
-            let mut chain: Vec<Arc<dyn LlmDriver>> = vec![primary_driver.clone()];
-            for fb in &config.fallback_providers {
-                let fb_config = DriverConfig {
-                    provider: fb.provider.clone(),
-                    api_key: if fb.api_key_env.is_empty() {
-                        None
-                    } else {
-                        std::env::var(&fb.api_key_env).ok()
-                    },
-                    base_url: fb
-                        .base_url
-                        .clone()
-                        .or_else(|| config.provider_urls.get(&fb.provider).cloned()),
-                };
-                match drivers::create_driver(&fb_config) {
-                    Ok(d) => {
-                        info!(
-                            provider = %fb.provider,
-                            model = %fb.model,
-                            "Fallback provider configured"
-                        );
-                        chain.push(d);
-                    }
-                    Err(e) => {
-                        warn!(
-                            provider = %fb.provider,
-                            error = %e,
-                            "Fallback provider init failed — skipped"
-                        );
-                    }
+        match &primary_result {
+            Ok(d) => driver_chain.push(d.clone()),
+            Err(e) => {
+                warn!(
+                    provider = %config.default_model.provider,
+                    error = %e,
+                    "Primary LLM driver init failed — dashboard will still be accessible"
+                );
+            }
+        }
+
+        // Add fallback providers to the chain
+        for fb in &config.fallback_providers {
+            let fb_config = DriverConfig {
+                provider: fb.provider.clone(),
+                api_key: if fb.api_key_env.is_empty() {
+                    None
+                } else {
+                    std::env::var(&fb.api_key_env).ok()
+                },
+                base_url: fb
+                    .base_url
+                    .clone()
+                    .or_else(|| config.provider_urls.get(&fb.provider).cloned()),
+            };
+            match drivers::create_driver(&fb_config) {
+                Ok(d) => {
+                    info!(
+                        provider = %fb.provider,
+                        model = %fb.model,
+                        "Fallback provider configured"
+                    );
+                    driver_chain.push(d);
+                }
+                Err(e) => {
+                    warn!(
+                        provider = %fb.provider,
+                        error = %e,
+                        "Fallback provider init failed — skipped"
+                    );
                 }
             }
-            if chain.len() > 1 {
-                Arc::new(openfang_runtime::drivers::fallback::FallbackDriver::new(
-                    chain,
-                ))
-            } else {
-                primary_driver
-            }
+        }
+
+        // Use the chain, or create a stub driver if everything failed
+        let driver: Arc<dyn LlmDriver> = if driver_chain.len() > 1 {
+            Arc::new(openfang_runtime::drivers::fallback::FallbackDriver::new(
+                driver_chain,
+            ))
+        } else if let Some(single) = driver_chain.into_iter().next() {
+            single
         } else {
-            primary_driver
+            // All drivers failed — use a stub that returns a helpful error.
+            // The kernel boots, dashboard is accessible, users can fix their config.
+            warn!("No LLM drivers available — agents will return errors until a provider is configured");
+            Arc::new(StubDriver) as Arc<dyn LlmDriver>
         };
 
         // Initialize metering engine (shares the same SQLite connection as the memory substrate)
@@ -989,8 +1021,10 @@ impl OpenFangKernel {
                         && restored_entry.manifest.model.base_url.is_none()
                     {
                         let dm = &kernel.config.default_model;
-                        let is_default_provider = restored_entry.manifest.model.provider.is_empty();
-                        let is_default_model = restored_entry.manifest.model.model.is_empty();
+                        let is_default_provider = restored_entry.manifest.model.provider.is_empty()
+                            || restored_entry.manifest.model.provider == "default";
+                        let is_default_model = restored_entry.manifest.model.model.is_empty()
+                            || restored_entry.manifest.model.model == "default";
                         if is_default_provider && is_default_model {
                             if !dm.provider.is_empty() {
                                 restored_entry.manifest.model.provider = dm.provider.clone();
@@ -1068,8 +1102,8 @@ impl OpenFangKernel {
         info!(agent = %name, id = %agent_id, exec_mode = ?manifest.exec_policy.as_ref().map(|p| &p.mode), "Agent exec_policy resolved");
 
         // Overlay kernel default_model onto agent if agent didn't explicitly choose.
-        // Only override when the agent has empty (unset) provider/model fields.
-        // This preserves explicit model choices like provider="groq", model="llama-3.3-70b".
+        // Treat empty or "default" as "use the kernel's configured default_model".
+        // This allows bundled agents to defer to the user's configured provider/model.
         if manifest.model.api_key_env.is_none() && manifest.model.base_url.is_none() {
             // Check hot-reloaded override first, fall back to boot-time config
             let override_guard = self
@@ -1079,8 +1113,10 @@ impl OpenFangKernel {
             let dm = override_guard
                 .as_ref()
                 .unwrap_or(&self.config.default_model);
-            let is_default_provider = manifest.model.provider.is_empty();
-            let is_default_model = manifest.model.model.is_empty();
+            let is_default_provider =
+                manifest.model.provider.is_empty() || manifest.model.provider == "default";
+            let is_default_model =
+                manifest.model.model.is_empty() || manifest.model.model == "default";
             if is_default_provider && is_default_model {
                 if !dm.provider.is_empty() {
                     manifest.model.provider = dm.provider.clone();
@@ -2820,6 +2856,15 @@ impl OpenFangKernel {
                 max_iterations: max_iter,
                 ..Default::default()
             }),
+            // Autonomous hands must run in Continuous mode so the background loop picks them up.
+            // Reactive (default) only fires on incoming messages, so autonomous hands would be inert.
+            schedule: if def.agent.max_iterations.is_some() {
+                ScheduleMode::Continuous {
+                    check_interval_secs: 60,
+                }
+            } else {
+                ScheduleMode::default()
+            },
             skills: def.skills.clone(),
             mcp_servers: def.mcp_servers.clone(),
             // Hands are curated packages — if they declare shell_exec, grant full exec access
@@ -3636,7 +3681,7 @@ impl OpenFangKernel {
     }
 
     /// Start the background loop / register triggers for a single agent.
-    fn start_background_for_agent(
+    pub fn start_background_for_agent(
         self: &Arc<Self>,
         agent_id: AgentId,
         name: &str,
