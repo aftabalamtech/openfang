@@ -68,6 +68,18 @@ pub struct AgentUpdateRequest {
     pub manifest_toml: String,
 }
 
+/// Legacy request body for PATCH/PUT /api/agents/{id}.
+///
+/// Historically clients send partial fields like `name` and `model` to this route.
+/// Keep this shape for backward compatibility.
+#[derive(Debug, Deserialize)]
+pub struct AgentLegacyPatchRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
 /// Request to change an agent's operational mode.
 #[derive(Debug, Deserialize)]
 pub struct SetModeRequest {
