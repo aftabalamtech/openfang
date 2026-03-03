@@ -214,10 +214,17 @@ impl LlmDriver for AnthropicDriver {
 
             let status = resp.status().as_u16();
 
-            if status == 429 || status == 529 {
+            if status == 429 || status == 529 || status == 408 {
                 if attempt < max_retries {
-                    let retry_ms = (attempt + 1) as u64 * 2000;
-                    warn!(status, retry_ms, "Rate limited, retrying");
+                    // Respect Retry-After header from proxy queue, fall back to exponential backoff
+                    let retry_ms = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .map(|secs| secs * 1000)
+                        .unwrap_or((attempt + 1) as u64 * 2000);
+                    warn!(status, retry_ms, attempt, "Rate limited / queued, retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(retry_ms)).await;
                     continue;
                 }
@@ -321,10 +328,16 @@ impl LlmDriver for AnthropicDriver {
 
             let status = resp.status().as_u16();
 
-            if status == 429 || status == 529 {
+            if status == 429 || status == 529 || status == 408 {
                 if attempt < max_retries {
-                    let retry_ms = (attempt + 1) as u64 * 2000;
-                    warn!(status, retry_ms, "Rate limited (stream), retrying");
+                    let retry_ms = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .map(|secs| secs * 1000)
+                        .unwrap_or((attempt + 1) as u64 * 2000);
+                    warn!(status, retry_ms, attempt, "Rate limited / queued (stream), retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(retry_ms)).await;
                     continue;
                 }
