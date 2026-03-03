@@ -38,6 +38,70 @@ detect_platform() {
     esac
 }
 
+normalize_shell_name() {
+    case "$1" in
+        *fish*) echo "fish" ;;
+        *zsh*) echo "zsh" ;;
+        *bash*) echo "bash" ;;
+        *sh) echo "sh" ;;
+        *) echo "" ;;
+    esac
+}
+
+get_process_name() {
+    local pid="$1"
+    ps -p "$pid" -o comm= 2>/dev/null | awk '{print $1}'
+}
+
+detect_user_shell() {
+    if [ -n "${OPENFANG_SHELL:-}" ]; then
+        normalize_shell_name "$OPENFANG_SHELL"
+        return
+    fi
+
+    local shell_from_env=""
+    shell_from_env=$(normalize_shell_name "${SHELL:-}")
+    if [ -n "$shell_from_env" ] && [ "$shell_from_env" != "sh" ]; then
+        echo "$shell_from_env"
+        return
+    fi
+
+    local parent=""
+    parent=$(normalize_shell_name "$(get_process_name "${PPID:-0}")")
+    if [ -n "$parent" ] && [ "$parent" != "sh" ]; then
+        echo "$parent"
+        return
+    fi
+
+    local grand_pid=""
+    local grand=""
+    grand_pid=$(ps -p "${PPID:-0}" -o ppid= 2>/dev/null | tr -d ' ')
+    if [ -n "$grand_pid" ]; then
+        grand=$(normalize_shell_name "$(get_process_name "$grand_pid")")
+        if [ -n "$grand" ] && [ "$grand" != "sh" ]; then
+            echo "$grand"
+            return
+        fi
+    fi
+
+    echo "sh"
+}
+
+resolve_shell_profile() {
+    case "$1" in
+        fish) echo "$HOME/.config/fish/config.fish" ;;
+        zsh) echo "$HOME/.zshrc" ;;
+        bash)
+            if [ -f "$HOME/.bashrc" ]; then
+                echo "$HOME/.bashrc"
+            else
+                echo "$HOME/.bash_profile"
+            fi
+            ;;
+        *) echo "$HOME/.profile" ;;
+    esac
+}
+
 install() {
     detect_platform
 
@@ -111,23 +175,24 @@ install() {
     chmod +x "$INSTALL_DIR/openfang"
 
     # Add to PATH
-    SHELL_RC=""
-    case "${SHELL:-}" in
-        */zsh) SHELL_RC="$HOME/.zshrc" ;;
-        */bash) SHELL_RC="$HOME/.bashrc" ;;
-        */fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
-    esac
+    DETECTED_SHELL=$(detect_user_shell)
+    SHELL_RC=$(resolve_shell_profile "$DETECTED_SHELL")
 
-    if [ -n "$SHELL_RC" ] && ! grep -q "openfang" "$SHELL_RC" 2>/dev/null; then
-        case "${SHELL:-}" in
-            */fish)
-                mkdir -p "$(dirname "$SHELL_RC")"
-                echo "set -gx PATH \"$INSTALL_DIR\" \$PATH" >> "$SHELL_RC"
+    if [ -n "$SHELL_RC" ] && ! grep -Fq "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
+        mkdir -p "$(dirname "$SHELL_RC")"
+        if [ ! -f "$SHELL_RC" ]; then
+            touch "$SHELL_RC"
+        fi
+
+        case "$DETECTED_SHELL" in
+            fish)
+                echo "fish_add_path \"$INSTALL_DIR\"" >> "$SHELL_RC"
                 ;;
             *)
                 echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
                 ;;
         esac
+        echo "  Detected shell: $DETECTED_SHELL"
         echo "  Added $INSTALL_DIR to PATH in $SHELL_RC"
     fi
 
