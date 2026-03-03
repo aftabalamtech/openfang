@@ -3178,7 +3178,7 @@ pub async fn clawhub_skill_code(
     Path(slug): Path<String>,
 ) -> impl IntoResponse {
     let cache_dir = state.kernel.config.home_dir.join(".cache").join("clawhub");
-    let client = openfang_skills::clawhub::ClawHubClient::new(cache_dir);
+    let client = openfang_skills::clawhub::ClawHubClient::new(cache_dir, state.kernel.http_clients.default.clone());
 
     // Try to fetch SKILL.md first, then fallback to package.json
     let mut code = String::new();
