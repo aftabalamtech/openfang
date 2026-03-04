@@ -70,9 +70,7 @@ impl ClaudeCodeDriver {
 
     /// Map a model ID like "claude-code/opus" to CLI --model flag value.
     fn model_flag(model: &str) -> Option<String> {
-        let stripped = model
-            .strip_prefix("claude-code/")
-            .unwrap_or(model);
+        let stripped = model.strip_prefix("claude-code/").unwrap_or(model);
         match stripped {
             "opus" => Some("opus".to_string()),
             "sonnet" => Some("sonnet".to_string()),
@@ -82,7 +80,7 @@ impl ClaudeCodeDriver {
     }
 }
 
-/// JSON output from `claude -p --output-format json`.
+/// JSON output from `claude -p --output-format json` (legacy format).
 #[derive(Debug, Deserialize)]
 struct ClaudeJsonOutput {
     result: Option<String>,
@@ -94,7 +92,7 @@ struct ClaudeJsonOutput {
 }
 
 /// Usage stats from Claude CLI JSON output.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 struct ClaudeUsage {
     #[serde(default)]
     input_tokens: u64,
@@ -102,7 +100,83 @@ struct ClaudeUsage {
     output_tokens: u64,
 }
 
+// ── New-format structs (Claude Code >= 2.x event array) ─────────────
+
+/// A content part inside an assistant message.
+#[derive(Debug, Deserialize)]
+struct ClaudeContentPart {
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// The `message` object inside a `type: "assistant"` event.
+#[derive(Debug, Deserialize)]
+struct ClaudeAssistantMessage {
+    #[serde(default)]
+    content: Vec<ClaudeContentPart>,
+    #[serde(default)]
+    usage: Option<ClaudeUsage>,
+}
+
+/// A single event in the new-format array output.
+///
+/// Covers: `system`, `assistant`, `result` event types.
+/// Unknown fields are silently ignored via `#[serde(default)]`.
+#[derive(Debug, Deserialize)]
+struct ClaudeEvent {
+    #[serde(default)]
+    r#type: String,
+    // assistant event
+    #[serde(default)]
+    message: Option<ClaudeAssistantMessage>,
+    // result event
+    #[serde(default)]
+    result: Option<String>,
+    #[serde(default)]
+    usage: Option<ClaudeUsage>,
+}
+
+/// Extract text and usage from the new-format event array.
+///
+/// Priority: `result.result` > concatenated `assistant.message.content[].text`.
+/// Usage: taken from `result.usage`, falling back to `assistant.message.usage`.
+fn extract_from_events(events: &[ClaudeEvent]) -> (String, ClaudeUsage) {
+    let mut assistant_text = String::new();
+    let mut result_text: Option<String> = None;
+    let mut usage = ClaudeUsage::default();
+
+    for event in events {
+        match event.r#type.as_str() {
+            "assistant" => {
+                if let Some(ref msg) = event.message {
+                    for part in &msg.content {
+                        if let Some(ref t) = part.text {
+                            assistant_text.push_str(t);
+                        }
+                    }
+                    if let Some(ref u) = msg.usage {
+                        usage = u.clone();
+                    }
+                }
+            }
+            "result" => {
+                if let Some(ref r) = event.result {
+                    result_text = Some(r.clone());
+                }
+                if let Some(ref u) = event.usage {
+                    usage = u.clone();
+                }
+            }
+            _ => {} // system, etc. — skip
+        }
+    }
+
+    (result_text.unwrap_or(assistant_text), usage)
+}
+
 /// Stream JSON event from `claude -p --output-format stream-json`.
+///
+/// Kept for backward compatibility with older Claude CLI versions.
 #[derive(Debug, Deserialize)]
 struct ClaudeStreamEvent {
     #[serde(default)]
@@ -111,6 +185,8 @@ struct ClaudeStreamEvent {
     content: Option<String>,
     #[serde(default)]
     result: Option<String>,
+    #[serde(default)]
+    message: Option<ClaudeAssistantMessage>,
     #[serde(default)]
     usage: Option<ClaudeUsage>,
 }
@@ -155,22 +231,48 @@ impl LlmDriver for ClaudeCodeDriver {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Try JSON parse first
+        // Parse CLI output — supports two formats:
+        //
+        // Legacy (single object):  {"result": "...", "usage": {...}}
+        // New (event array):       [{"type":"system",...},{"type":"assistant","message":{...}},{"type":"result","result":"..."}]
+
+        // Try legacy single-object format first
         if let Ok(parsed) = serde_json::from_str::<ClaudeJsonOutput>(&stdout) {
-            let text = parsed.result.unwrap_or_default();
-            let usage = parsed.usage.unwrap_or_default();
-            return Ok(CompletionResponse {
-                content: vec![ContentBlock::Text { text: text.clone() }],
-                stop_reason: StopReason::EndTurn,
-                tool_calls: Vec::new(),
-                usage: TokenUsage {
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                },
-            });
+            if parsed.result.is_some() {
+                let text = parsed.result.unwrap_or_default();
+                let usage = parsed.usage.unwrap_or_default();
+                debug!("Parsed Claude CLI output (legacy object format)");
+                return Ok(CompletionResponse {
+                    content: vec![ContentBlock::Text { text }],
+                    stop_reason: StopReason::EndTurn,
+                    tool_calls: Vec::new(),
+                    usage: TokenUsage {
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                    },
+                });
+            }
+        }
+
+        // Try new event-array format
+        if let Ok(events) = serde_json::from_str::<Vec<ClaudeEvent>>(&stdout) {
+            let (text, usage) = extract_from_events(&events);
+            if !text.is_empty() {
+                debug!("Parsed Claude CLI output (event array format)");
+                return Ok(CompletionResponse {
+                    content: vec![ContentBlock::Text { text }],
+                    stop_reason: StopReason::EndTurn,
+                    tool_calls: Vec::new(),
+                    usage: TokenUsage {
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                    },
+                });
+            }
         }
 
         // Fallback: treat entire stdout as plain text
+        warn!("Claude CLI output did not match known JSON formats, using raw text");
         let text = stdout.trim().to_string();
         Ok(CompletionResponse {
             content: vec![ContentBlock::Text { text }],
@@ -242,6 +344,27 @@ impl LlmDriver for ClaudeCodeDriver {
                                     .await;
                             }
                         }
+                        "assistant" => {
+                            // New format: text lives in message.content[].text
+                            if let Some(ref msg) = event.message {
+                                for part in &msg.content {
+                                    if let Some(ref t) = part.text {
+                                        full_text.push_str(t);
+                                        let _ = tx
+                                            .send(StreamEvent::TextDelta {
+                                                text: t.clone(),
+                                            })
+                                            .await;
+                                    }
+                                }
+                                if let Some(ref u) = msg.usage {
+                                    final_usage = TokenUsage {
+                                        input_tokens: u.input_tokens,
+                                        output_tokens: u.output_tokens,
+                                    };
+                                }
+                            }
+                        }
                         "result" | "done" | "complete" => {
                             if let Some(ref result) = event.result {
                                 if full_text.is_empty() {
@@ -253,7 +376,7 @@ impl LlmDriver for ClaudeCodeDriver {
                                         .await;
                                 }
                             }
-                            if let Some(usage) = event.usage {
+                            if let Some(ref usage) = event.usage {
                                 final_usage = TokenUsage {
                                     input_tokens: usage.input_tokens,
                                     output_tokens: usage.output_tokens,
@@ -379,10 +502,70 @@ mod tests {
             ClaudeCodeDriver::model_flag("claude-code/haiku"),
             Some("haiku".to_string())
         );
+        // Full model IDs pass through
+        assert_eq!(
+            ClaudeCodeDriver::model_flag("claude-sonnet-4-6"),
+            Some("claude-sonnet-4-6".to_string())
+        );
+        assert_eq!(
+            ClaudeCodeDriver::model_flag("claude-opus-4-6"),
+            Some("claude-opus-4-6".to_string())
+        );
+        // Unknown models pass through
         assert_eq!(
             ClaudeCodeDriver::model_flag("custom-model"),
             Some("custom-model".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_legacy_json_format() {
+        let json = r#"{"result":"Hello world","usage":{"input_tokens":10,"output_tokens":5}}"#;
+        let parsed: ClaudeJsonOutput = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.result.unwrap(), "Hello world");
+        let usage = parsed.usage.unwrap();
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 5);
+    }
+
+    #[test]
+    fn test_parse_new_event_array_format() {
+        let json = r#"[
+            {"type":"system","session_id":"abc"},
+            {"type":"assistant","message":{"content":[{"text":"我是 Claude","type":"text"}],"usage":{"input_tokens":100,"output_tokens":20}}},
+            {"type":"result","subtype":"success","result":"我是 Claude","usage":{"input_tokens":100,"output_tokens":20}}
+        ]"#;
+        let events: Vec<ClaudeEvent> = serde_json::from_str(json).unwrap();
+        assert_eq!(events.len(), 3);
+
+        let (text, usage) = extract_from_events(&events);
+        assert_eq!(text, "我是 Claude");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 20);
+    }
+
+    #[test]
+    fn test_parse_event_array_no_result_field() {
+        // If result event has no result string, fall back to assistant text
+        let json = r#"[
+            {"type":"assistant","message":{"content":[{"text":"fallback text","type":"text"}]}},
+            {"type":"result","subtype":"success","usage":{"input_tokens":50,"output_tokens":10}}
+        ]"#;
+        let events: Vec<ClaudeEvent> = serde_json::from_str(json).unwrap();
+        let (text, usage) = extract_from_events(&events);
+        assert_eq!(text, "fallback text");
+        assert_eq!(usage.input_tokens, 50);
+    }
+
+    #[test]
+    fn test_parse_event_array_multi_content_parts() {
+        let json = r#"[
+            {"type":"assistant","message":{"content":[{"text":"part1","type":"text"},{"text":" part2","type":"text"}]}},
+            {"type":"result","result":"part1 part2"}
+        ]"#;
+        let events: Vec<ClaudeEvent> = serde_json::from_str(json).unwrap();
+        let (text, _) = extract_from_events(&events);
+        assert_eq!(text, "part1 part2");
     }
 
     #[test]
