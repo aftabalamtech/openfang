@@ -169,9 +169,18 @@ impl ModelCatalog {
     ///
     /// Each entry maps a provider ID to a custom base URL.
     /// Unknown providers are silently skipped.
+    /// Providers with explicit URL overrides are marked as configured since
+    /// the user intentionally set them up (e.g. local proxies, custom endpoints).
     pub fn apply_url_overrides(&mut self, overrides: &HashMap<String, String>) {
         for (provider, url) in overrides {
-            self.set_provider_url(provider, url);
+            if self.set_provider_url(provider, url) {
+                // Mark as configured so models from this provider show as available
+                if let Some(p) = self.providers.iter_mut().find(|p| p.id == *provider) {
+                    if p.auth_status == AuthStatus::Missing {
+                        p.auth_status = AuthStatus::Configured;
+                    }
+                }
+            }
         }
     }
 
