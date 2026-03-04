@@ -746,11 +746,14 @@ impl Default for CanvasConfig {
 #[serde(rename_all = "lowercase")]
 pub enum ExecSecurityMode {
     /// Block all shell execution.
+    #[serde(alias = "none", alias = "disabled")]
     Deny,
     /// Only allow commands in safe_bins or allowed_commands.
     #[default]
+    #[serde(alias = "restricted")]
     Allowlist,
     /// Allow all commands (unsafe, dev only).
+    #[serde(alias = "allow", alias = "all", alias = "unrestricted")]
     Full,
 }
 
@@ -1165,7 +1168,7 @@ fn default_language() -> String {
 
 impl Default for KernelConfig {
     fn default() -> Self {
-        let home_dir = dirs_next_home().join(".openfang");
+        let home_dir = openfang_home_dir();
         Self {
             data_dir: home_dir.join("data"),
             home_dir,
@@ -1305,9 +1308,16 @@ impl std::fmt::Debug for KernelConfig {
     }
 }
 
-/// Fallback home directory resolution.
-fn dirs_next_home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(std::env::temp_dir)
+/// Resolve the OpenFang home directory.
+///
+/// Priority: `OPENFANG_HOME` env var > `~/.openfang`.
+fn openfang_home_dir() -> PathBuf {
+    if let Ok(home) = std::env::var("OPENFANG_HOME") {
+        return PathBuf::from(home);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".openfang")
 }
 
 /// Default LLM model configuration.
@@ -1549,10 +1559,14 @@ pub struct DiscordConfig {
     /// Env var name holding the bot token (NOT the token itself).
     pub bot_token_env: String,
     /// Guild (server) IDs allowed to interact (empty = allow all).
-    pub allowed_guilds: Vec<u64>,
+    /// Accepts strings for consistency with other channel configs.
+    pub allowed_guilds: Vec<String>,
+    /// User IDs allowed to interact (empty = allow all).
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
     /// Default agent name to route messages to.
     pub default_agent: Option<String>,
-    /// Gateway intents bitmask (default: 33280 = GUILD_MESSAGES | MESSAGE_CONTENT).
+    /// Gateway intents bitmask (default: 37376 = GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT).
     pub intents: u64,
     /// Per-channel behavior overrides.
     #[serde(default)]
@@ -1564,8 +1578,9 @@ impl Default for DiscordConfig {
         Self {
             bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
             allowed_guilds: vec![],
+            allowed_users: vec![],
             default_agent: None,
-            intents: 33280,
+            intents: 37376,
             overrides: ChannelOverrides::default(),
         }
     }
@@ -3222,7 +3237,7 @@ mod tests {
         let dc = DiscordConfig::default();
         assert_eq!(dc.bot_token_env, "DISCORD_BOT_TOKEN");
         assert!(dc.allowed_guilds.is_empty());
-        assert_eq!(dc.intents, 33280);
+        assert_eq!(dc.intents, 37376);
     }
 
     #[test]

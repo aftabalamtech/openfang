@@ -178,6 +178,10 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
             base_url: LEMONADE_BASE_URL,
             api_key_env: "LEMONADE_API_KEY",
             key_required: false,
+        "volcengine" | "doubao" => Some(ProviderDefaults {
+            base_url: VOLCENGINE_BASE_URL,
+            api_key_env: "VOLCENGINE_API_KEY",
+            key_required: true,
         }),
         _ => None,
     }
@@ -366,6 +370,7 @@ pub fn known_providers() -> &'static [&'static str] {
         "zhipu",
         "zhipu_coding",
         "qianfan",
+        "volcengine",
         "codex",
         "claude-code",
         "lemonade",
@@ -462,6 +467,7 @@ mod tests {
         assert!(providers.contains(&"zhipu"));
         assert!(providers.contains(&"zhipu_coding"));
         assert!(providers.contains(&"qianfan"));
+        assert!(providers.contains(&"volcengine"));
         assert!(providers.contains(&"codex"));
         assert!(providers.contains(&"claude-code"));
         assert!(providers.contains(&"lemonade"));
@@ -474,6 +480,7 @@ mod tests {
         assert_eq!(d.base_url, "http://127.0.0.1:8000");
         assert_eq!(d.api_key_env, "LEMONADE_API_KEY");
         assert!(!d.key_required);
+        assert_eq!(providers.len(), 30);
     }
 
     #[test]

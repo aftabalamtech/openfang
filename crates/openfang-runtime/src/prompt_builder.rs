@@ -53,6 +53,8 @@ pub struct PromptContext {
     pub heartbeat_md: Option<String>,
     /// Peer agents visible to this agent: (name, state, model).
     pub peer_agents: Vec<(String, String, String)>,
+    /// Current date/time string for temporal awareness.
+    pub current_date: Option<String>,
 }
 
 /// Build the complete system prompt from a `PromptContext`.
@@ -65,6 +67,11 @@ pub fn build_system_prompt(ctx: &PromptContext) -> String {
 
     // Section 1 — Agent Identity (always present)
     sections.push(build_identity_section(ctx));
+
+    // Section 1.5 — Current Date/Time (always present when set)
+    if let Some(ref date) = ctx.current_date {
+        sections.push(format!("## Current Date\nToday is {date}."));
+    }
 
     // Section 2 — Tool Call Behavior (skip for subagents)
     if !ctx.is_subagent {
@@ -208,6 +215,9 @@ const TOOL_CALL_BEHAVIOR: &str = "\
 - Prefer action over narration. If you can answer by using a tool, do it.
 - When executing multiple sequential tool calls, batch them — don't output reasoning between each call.
 - If a tool returns useful results, present the KEY information, not the raw output.
+- When web_fetch or web_search returns content, you MUST include the relevant data in your response. \
+Quote specific facts, numbers, or passages from the fetched content. Never say you fetched something \
+without sharing what you found.
 - Start with the answer, not meta-commentary about how you'll help.
 - IMPORTANT: If your instructions or persona mention a shell command, script path, or code snippet, \
 execute it via the appropriate tool call (shell_exec, file_write, etc.). Never output commands as \
