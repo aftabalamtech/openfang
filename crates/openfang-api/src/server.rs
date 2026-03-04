@@ -158,12 +158,12 @@ pub async fn build_router(
             axum::routing::post(routes::reset_session),
         )
         .route(
-            "/api/agents/{id}/history",
-            axum::routing::delete(routes::clear_agent_history),
-        )
-        .route(
             "/api/agents/{id}/session/compact",
             axum::routing::post(routes::compact_session),
+        )
+        .route(
+            "/api/agents/{id}/history",
+            axum::routing::delete(routes::clear_agent_history),
         )
         .route(
             "/api/agents/{id}/stop",

@@ -173,7 +173,6 @@ impl MemorySubstrate {
     pub fn delete_canonical_session(&self, agent_id: AgentId) -> OpenFangResult<()> {
         self.sessions.delete_canonical_session(agent_id)
     }
-
     /// Set or clear a session label.
     pub fn set_session_label(
         &self,
