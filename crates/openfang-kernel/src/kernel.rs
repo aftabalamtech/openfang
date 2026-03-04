@@ -1486,16 +1486,22 @@ impl OpenFangKernel {
 
         let tools = self.available_tools(agent_id);
         let tools = entry.mode.filter_tools(tools);
-        let driver = self.resolve_driver(&entry.manifest)?;
-
-        // Look up model's actual context window from the catalog
-        let ctx_window = self.model_catalog.read().ok().and_then(|cat| {
-            cat.find_model(&entry.manifest.model.model)
-                .map(|m| m.context_window as usize)
-        });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let mut manifest = entry.manifest.clone();
+
+        // Kimi K2.5/K2 models require temperature=1.0 (API rejects other values)
+        if manifest.model.model.contains("kimi-k2") {
+            manifest.model.temperature = 1.0;
+        }
+
+        let driver = self.resolve_driver(&manifest)?;
+
+        // Look up model's actual context window from the catalog
+        let ctx_window = self.model_catalog.read().ok().and_then(|cat| {
+            cat.find_model(&manifest.model.model)
+                .map(|m| m.context_window as usize)
+        });
 
         // Lazy backfill: create workspace for existing agents spawned before workspaces
         if manifest.workspace.is_none() {
@@ -2127,6 +2133,11 @@ impl OpenFangKernel {
                     }
                 }
             }
+        }
+
+        // Kimi K2.5/K2 models require temperature=1.0 (API rejects other values)
+        if manifest.model.model.contains("kimi-k2") {
+            manifest.model.temperature = 1.0;
         }
 
         let driver = self.resolve_driver(&manifest)?;
