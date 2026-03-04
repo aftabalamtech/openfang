@@ -840,6 +840,7 @@
                     <div class="font-bold" style="font-size:13px" x-text="agent.name"></div>
                     <div class="text-xs text-dim font-mono" style="font-size:11px" x-text="agent.model_name"></div>
                   </div>
+                  <button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" @click.stop="showDetail(agent)">Config</button>
                   <span class="badge" :class="'badge-' + agent.state.toLowerCase()" x-text="agent.state" style="font-size:10px"></span>
                 </div>
               </template>
@@ -1078,7 +1079,7 @@
                   <div x-show="spawnStep === 2">
                     <div class="form-group">
                       <label>Provider</label>
-                      <select class="form-select" x-model="spawnForm.provider">
+                      <select class="form-select" x-model="spawnForm.provider" @change="onSpawnProviderChange()">
                         <option value="anthropic">Anthropic</option><option value="openai">OpenAI</option>
                         <option value="groq">Groq</option><option value="ollama">Ollama</option>
                         <option value="google">Google</option><option value="mistral">Mistral</option>
@@ -1089,7 +1090,12 @@
                     </div>
                     <div class="form-group">
                       <label>Model</label>
-                      <input class="form-input" x-model="spawnForm.model" placeholder="e.g. llama-3.3-70b-versatile">
+                      <select class="form-select" x-model="spawnForm.model" x-show="availableModelsForSelectedProvider.length > 0">
+                        <template x-for="m in availableModelsForSelectedProvider" :key="m.id">
+                          <option :value="m.id" x-text="m.display_name ? (m.display_name + ' (' + m.id + ')') : m.id"></option>
+                        </template>
+                      </select>
+                      <input class="form-input" x-model="spawnForm.model" x-show="availableModelsForSelectedProvider.length === 0" placeholder="No available models for this provider. Enter model ID manually.">
                     </div>
                     <div class="form-group">
                       <label>System Prompt</label>

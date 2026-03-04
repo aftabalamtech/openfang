@@ -69,6 +69,9 @@ function agentsPage() {
     tplProviders: [],
     tplLoading: false,
     tplLoadError: '',
+    spawnModels: [],
+    spawnModelsLoading: false,
+    spawnModelsLoaded: false,
     selectedCategory: 'All',
     searchQuery: '',
 
@@ -254,6 +257,14 @@ function agentsPage() {
       return p ? p.auth_status === 'configured' : false;
     },
 
+    get availableModelsForSelectedProvider() {
+      var provider = this.spawnForm.provider;
+      if (!provider) return [];
+      return this.spawnModels.filter(function(m) {
+        return m.provider === provider && m.available;
+      });
+    },
+
     async init() {
       var self = this;
       this.loading = true;
@@ -304,6 +315,32 @@ function agentsPage() {
         this.tplLoadError = e.message || 'Could not load templates.';
       }
       this.tplLoading = false;
+    },
+
+    async loadSpawnModels() {
+      if (this.spawnModelsLoaded || this.spawnModelsLoading) return;
+      this.spawnModelsLoading = true;
+      try {
+        var data = await OpenFangAPI.get('/api/models?available=true');
+        this.spawnModels = data.models || [];
+        this.spawnModelsLoaded = true;
+        this.syncSpawnModelWithProvider();
+      } catch (e) {
+        this.spawnModels = [];
+      }
+      this.spawnModelsLoading = false;
+    },
+
+    syncSpawnModelWithProvider() {
+      var models = this.availableModelsForSelectedProvider;
+      if (!models.length) return;
+      var current = this.spawnForm.model;
+      var exists = models.some(function(m) { return m.id === current; });
+      if (!exists) this.spawnForm.model = models[0].id;
+    },
+
+    onSpawnProviderChange() {
+      this.syncSpawnModelWithProvider();
     },
 
     chatWithAgent(agent) {
@@ -377,6 +414,8 @@ function agentsPage() {
       this.spawnForm.name = '';
       this.spawnForm.systemPrompt = 'You are a helpful assistant.';
       this.spawnForm.profile = 'full';
+      this.loadSpawnModels();
+      this.syncSpawnModelWithProvider();
     },
 
     nextStep() {
