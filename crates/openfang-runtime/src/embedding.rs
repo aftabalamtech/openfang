@@ -9,7 +9,7 @@ use openfang_types::model_catalog::{
     FIREWORKS_BASE_URL, GROQ_BASE_URL, LMSTUDIO_BASE_URL, MISTRAL_BASE_URL, OLLAMA_BASE_URL,
     OPENAI_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tracing::{debug, warn};
 use zeroize::Zeroizing;
 
@@ -76,15 +76,7 @@ struct EmbedRequest<'a> {
     input: &'a [&'a str],
 }
 
-#[derive(Deserialize)]
-struct EmbedResponse {
-    data: Vec<EmbedData>,
-}
 
-#[derive(Deserialize)]
-struct EmbedData {
-    embedding: Vec<f32>,
-}
 
 impl OpenAIEmbeddingDriver {
     /// Create a new OpenAI-compatible embedding driver.

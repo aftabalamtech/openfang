@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tracing::info;
-use tokio::time;
+
 
 // ---------------------------------------------------------------------------
 // API response types (matching actual ClawHub v1 API — verified Feb 2026)
@@ -283,10 +283,12 @@ impl ClawHubClient {
             )));
         }
 
-        let results: ClawHubSearchResponse = response
-            .json()
-            .await
-            .map_err(|e| SkillError::Network(format!("Failed to parse ClawHub response: {e}")))?;
+        // 先读取响应内容，然后再尝试解析
+        let body = response.text().await.map_err(|e| SkillError::Network(format!("Failed to read ClawHub response: {e}")))?;
+        
+        // 尝试解析响应内容
+        let results: ClawHubSearchResponse = serde_json::from_str(&body)
+            .map_err(|e| SkillError::Network(format!("Failed to parse ClawHub response: {e}. Response: {}", body)))?;
 
         Ok(results)
     }
@@ -326,10 +328,12 @@ impl ClawHubClient {
             )));
         }
 
-        let results: ClawHubBrowseResponse = response
-            .json()
-            .await
-            .map_err(|e| SkillError::Network(format!("Failed to parse ClawHub browse: {e}")))?;
+        // 先读取响应内容，然后再尝试解析
+        let body = response.text().await.map_err(|e| SkillError::Network(format!("Failed to read ClawHub response: {e}")))?;
+        
+        // 尝试解析响应内容
+        let results: ClawHubBrowseResponse = serde_json::from_str(&body)
+            .map_err(|e| SkillError::Network(format!("Failed to parse ClawHub browse: {e}. Response: {}", body)))?;
 
         Ok(results)
     }
@@ -356,10 +360,12 @@ impl ClawHubClient {
             )));
         }
 
-        let detail: ClawHubSkillDetail = response
-            .json()
-            .await
-            .map_err(|e| SkillError::Network(format!("Failed to parse ClawHub detail: {e}")))?;
+        // 先读取响应内容，然后再尝试解析
+        let body = response.text().await.map_err(|e| SkillError::Network(format!("Failed to read ClawHub response: {e}")))?;
+        
+        // 尝试解析响应内容
+        let detail: ClawHubSkillDetail = serde_json::from_str(&body)
+            .map_err(|e| SkillError::Network(format!("Failed to parse ClawHub detail: {e}. Response: {}", body)))?;
 
         Ok(detail)
     }
@@ -430,7 +436,7 @@ impl ClawHubClient {
 
         // Add retry logic for 429 Too Many Requests
         let mut retries = 3;
-        let mut response = loop {
+        let response = loop {
             let resp = self
                 .client
                 .get(&url)

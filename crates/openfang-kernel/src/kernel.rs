@@ -3120,46 +3120,74 @@ impl OpenFangKernel {
         // Probe local providers for reachability and model discovery
         {
             let kernel = Arc::clone(self);
+            let show_warnings = self.config.local_providers.show_offline_warnings;
+            let enabled_providers = self.config.local_providers.enabled_providers.clone();
+            let check_interval = self.config.local_providers.check_interval_secs;
             tokio::spawn(async move {
-                let local_providers: Vec<(String, String)> = {
-                    let catalog = kernel
-                        .model_catalog
-                        .read()
-                        .unwrap_or_else(|e| e.into_inner());
-                    catalog
-                        .list_providers()
-                        .iter()
-                        .filter(|p| !p.key_required)
-                        .map(|p| (p.id.clone(), p.base_url.clone()))
-                        .collect()
-                };
+                // Track provider states (provider_id -> reachable)
+                let mut provider_states: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+                
+                // Initial check and continuous monitoring
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(check_interval)); // Check every configured seconds
+                
+                loop {
+                    let local_providers: Vec<(String, String)> = {
+                        let catalog = kernel
+                            .model_catalog
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner());
+                        catalog
+                            .list_providers()
+                            .iter()
+                            .filter(|p| !p.key_required)
+                            .filter(|p| enabled_providers.contains(&p.id))
+                            .map(|p| (p.id.clone(), p.base_url.clone()))
+                            .collect()
+                    };
 
-                for (provider_id, base_url) in &local_providers {
-                    let result =
-                        openfang_runtime::provider_health::probe_provider(provider_id, base_url)
-                            .await;
-                    if result.reachable {
-                        info!(
-                            provider = %provider_id,
-                            models = result.discovered_models.len(),
-                            latency_ms = result.latency_ms,
-                            "Local provider online"
-                        );
-                        if !result.discovered_models.is_empty() {
-                            if let Ok(mut catalog) = kernel.model_catalog.write() {
-                                catalog.merge_discovered_models(
-                                    provider_id,
-                                    &result.discovered_models,
+                    for (provider_id, base_url) in &local_providers {
+                        let result =
+                            openfang_runtime::provider_health::probe_provider(provider_id, base_url)
+                                .await;
+                        
+                        let previous_state = provider_states.get(provider_id).copied();
+                        
+                        if result.reachable {
+                            if previous_state.map_or(true, |s| !s) {
+                                // Provider just came online or first check
+                                warn!(
+                                    provider = %provider_id,
+                                    models = result.discovered_models.len(),
+                                    latency_ms = result.latency_ms,
+                                    "Local provider online"
                                 );
+                                if !result.discovered_models.is_empty() {
+                                    if let Ok(mut catalog) = kernel.model_catalog.write() {
+                                        catalog.merge_discovered_models(
+                                            provider_id,
+                                            &result.discovered_models,
+                                        );
+                                    }
+                                }
                             }
+                            provider_states.insert(provider_id.clone(), true);
+                        } else {
+                            if previous_state.map_or(true, |s| s) {
+                                // Provider just went offline or first check
+                                if show_warnings {
+                                    warn!(
+                                        provider = %provider_id,
+                                        error = result.error.as_deref().unwrap_or("unknown"),
+                                        "Local provider offline"
+                                    );
+                                }
+                            }
+                            provider_states.insert(provider_id.clone(), false);
                         }
-                    } else {
-                        warn!(
-                            provider = %provider_id,
-                            error = result.error.as_deref().unwrap_or("unknown"),
-                            "Local provider offline"
-                        );
                     }
+                    
+                    // Wait for next interval
+                    interval.tick().await;
                 }
             });
         }
