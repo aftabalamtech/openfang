@@ -1703,7 +1703,7 @@ mod tests {
     }
 
     #[test]
-    fn test_feishu_bridge_mode_defaults_to_webhook() {
+    fn test_feishu_bridge_mode_defaults_to_websocket() {
         let config: openfang_types::config::KernelConfig = toml::from_str(
             r#"
             [channels.feishu]
@@ -1714,7 +1714,7 @@ mod tests {
         .unwrap();
 
         let feishu = config.channels.feishu.expect("feishu config should exist");
-        assert_eq!(feishu.mode, openfang_types::config::FeishuMode::Webhook);
+        assert_eq!(feishu.mode, openfang_types::config::FeishuMode::Websocket);
     }
 
     #[test]

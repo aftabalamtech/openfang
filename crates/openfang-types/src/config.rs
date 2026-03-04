@@ -2198,9 +2198,9 @@ impl Default for BlueskyConfig {
 #[serde(rename_all = "lowercase")]
 pub enum FeishuMode {
     /// Receive events via HTTP webhook callback.
-    #[default]
     Webhook,
     /// Receive events via WebSocket long connection.
+    #[default]
     Websocket,
 }
 
@@ -2228,7 +2228,7 @@ impl Default for FeishuConfig {
         Self {
             app_id: String::new(),
             app_secret_env: "FEISHU_APP_SECRET".to_string(),
-            mode: FeishuMode::Webhook,
+            mode: FeishuMode::Websocket,
             webhook_port: 8453,
             default_agent: None,
             overrides: ChannelOverrides::default(),
@@ -3599,7 +3599,7 @@ mod tests {
     }
 
     #[test]
-    fn test_feishu_mode_defaults_to_webhook() {
+    fn test_feishu_mode_defaults_to_websocket() {
         let toml_str = r#"
             [channels.feishu]
             app_id = "cli_test"
@@ -3607,7 +3607,7 @@ mod tests {
         "#;
         let config: KernelConfig = toml::from_str(toml_str).unwrap();
         let feishu = config.channels.feishu.unwrap();
-        assert_eq!(feishu.mode, FeishuMode::Webhook);
+        assert_eq!(feishu.mode, FeishuMode::Websocket);
     }
 
     #[test]

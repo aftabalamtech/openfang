@@ -1477,7 +1477,7 @@ const CHANNEL_REGISTRY: &[ChannelMeta] = &[
             ChannelField { key: "default_agent", label: "Default Agent", field_type: FieldType::Text, env_var: None, required: false, placeholder: "assistant", advanced: true },
         ],
         setup_steps: &["Create an app at open.feishu.cn", "Copy App ID and Secret", "Paste them below"],
-        config_template: "[channels.feishu]\napp_id = \"\"\napp_secret_env = \"FEISHU_APP_SECRET\"\nmode = \"webhook\"",
+        config_template: "[channels.feishu]\napp_id = \"\"\napp_secret_env = \"FEISHU_APP_SECRET\"\nmode = \"websocket\"",
     },
     ChannelMeta {
         name: "dingtalk", display_name: "DingTalk", icon: "DT",
@@ -1874,9 +1874,9 @@ mod channel_meta_tests {
     }
 
     #[test]
-    fn feishu_channel_meta_template_includes_webhook_mode_default() {
+    fn feishu_channel_meta_template_includes_websocket_mode_default() {
         let meta = find_channel_meta("feishu").expect("feishu channel meta should exist");
-        assert!(meta.config_template.contains("mode = \"webhook\""));
+        assert!(meta.config_template.contains("mode = \"websocket\""));
     }
 }
 
