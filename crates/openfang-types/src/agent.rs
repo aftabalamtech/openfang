@@ -356,6 +356,7 @@ impl ToolProfile {
             memory_write: vec!["self.*".into()],
             ofp_discover: false,
             ofp_connect: vec![],
+            blocked_tools: vec![],
         }
     }
 }
@@ -549,6 +550,9 @@ pub struct ManifestCapabilities {
     /// Allowed OFP peer patterns.
     #[serde(default, deserialize_with = "crate::serde_compat::vec_lenient")]
     pub ofp_connect: Vec<String>,
+    /// Tools to exclude from this agent's available set (blocklist, overrides allowlist).
+    #[serde(default, deserialize_with = "crate::serde_compat::vec_lenient")]
+    pub blocked_tools: Vec<String>,
 }
 
 /// Human-readable session label (e.g., "support inbox", "research").

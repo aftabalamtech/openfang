@@ -4352,12 +4352,23 @@ impl OpenFangKernel {
 
         let caps = self.capabilities.list(agent_id);
 
-        // If agent has ToolAll, return all tools
+        // Apply per-agent blocklist
+        let empty_blocked: Vec<String> = Vec::new();
+        let blocked = entry
+            .as_ref()
+            .map(|e| &e.manifest.capabilities.blocked_tools)
+            .unwrap_or(&empty_blocked);
+
+
+        // If agent has ToolAll, return all tools (minus blocked)
         if caps.iter().any(|c| matches!(c, Capability::ToolAll)) {
-            return all_tools;
+            return all_tools
+                .into_iter()
+                .filter(|tool| !blocked.iter().any(|b| b == &tool.name))
+                .collect();
         }
 
-        // Filter to tools the agent has capability for
+        // Filter to tools the agent has capability for, minus blocked
         all_tools
             .into_iter()
             .filter(|tool| {
@@ -4366,6 +4377,7 @@ impl OpenFangKernel {
                     _ => false,
                 })
             })
+            .filter(|tool| !blocked.iter().any(|b| b == &tool.name))
             .collect()
     }
 
