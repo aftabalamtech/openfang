@@ -124,7 +124,7 @@ pub struct ClawHubSearchEntry {
     #[serde(default)]
     pub summary: String,
     #[serde(default)]
-    pub version: String,
+    pub version: Option<String>,
     /// Unix ms timestamp.
     #[serde(default)]
     pub updated_at: i64,
