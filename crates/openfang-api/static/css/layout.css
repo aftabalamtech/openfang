@@ -35,17 +35,18 @@
   align-items: center;
   justify-content: space-between;
   min-height: 60px;
+  gap: 0.5rem;
 }
 
 .sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 0.5rem;
 }
 
 .sidebar-logo img {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   opacity: 0.8;
   transition: opacity 0.2s, transform 0.2s;
 }
@@ -56,7 +57,7 @@
 }
 
 .sidebar-header h1 {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--accent);
   letter-spacing: 3px;
@@ -64,7 +65,7 @@
 }
 
 .sidebar-header .version {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--text-muted);
   margin-top: 1px;
   letter-spacing: 0.5px;

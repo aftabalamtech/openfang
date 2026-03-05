@@ -2147,7 +2147,7 @@
             <!-- Category quick-search chips (always visible when not searching) -->
             <div class="mb-4" x-show="!clawhubSearch">
               <div class="text-xs text-dim mb-2" style="letter-spacing:0.5px">CATEGORIES</div>
-              <div class="flex flex-wrap gap-1">
+              <div class="category-chips">
                 <template x-for="cat in categories" :key="cat.id">
                   <span class="filter-pill" style="font-size:0.7rem;padding:2px 8px" @click="searchCategory(cat)" x-text="cat.name"></span>
                 </template>
@@ -2424,28 +2424,30 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                       </div>
                       <span class="badge" :class="hand.requirements_met ? 'badge-success' : 'badge-dim'" x-text="hand.requirements_met ? 'Ready' : 'Setup needed'"></span>
                     </div>
-                    <div class="card-meta" x-text="hand.description"></div>
+                    <div class="card-body">
+                      <div class="card-meta" x-text="hand.description"></div>
 
-                    <!-- Requirements -->
-                    <div class="mt-3" x-show="hand.requirements && hand.requirements.length">
-                      <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">REQUIREMENTS</div>
-                      <template x-for="req in hand.requirements" :key="req.key">
-                        <div class="flex items-center gap-2 text-xs" style="padding:2px 0">
-                          <span :style="req.satisfied ? 'color:var(--success)' : 'color:var(--danger)'" x-text="req.satisfied ? '\u2713' : '\u2717'"></span>
-                          <span x-text="req.label"></span>
-                        </div>
-                      </template>
-                    </div>
+                      <!-- Requirements -->
+                      <div class="mt-3" x-show="hand.requirements && hand.requirements.length">
+                        <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">REQUIREMENTS</div>
+                        <template x-for="req in hand.requirements" :key="req.key">
+                          <div class="flex items-center gap-2 text-xs" style="padding:2px 0">
+                            <span :style="req.satisfied ? 'color:var(--success)' : 'color:var(--danger)'" x-text="req.satisfied ? '\u2713' : '\u2717'"></span>
+                            <span x-text="req.label"></span>
+                          </div>
+                        </template>
+                      </div>
 
-                    <!-- Tools -->
-                    <div class="mt-2">
-                      <span class="text-xs text-dim" x-text="hand.tools.length + ' tool(s)'"></span>
-                      <span class="text-xs text-dim" style="margin-left:8px" x-text="hand.dashboard_metrics + ' metric(s)'"></span>
-                      <span class="category-badge" style="margin-left:8px;font-size:0.65rem" x-text="hand.category"></span>
+                      <!-- Tools -->
+                      <div class="mt-2">
+                        <span class="text-xs text-dim" x-text="hand.tools.length + ' tool(s)'"></span>
+                        <span class="text-xs text-dim" style="margin-left:8px" x-text="hand.dashboard_metrics + ' metric(s)'"></span>
+                        <span class="category-badge" style="margin-left:8px;font-size:0.65rem" x-text="hand.category"></span>
+                      </div>
                     </div>
 
                     <!-- Actions -->
-                    <div class="flex justify-between items-center mt-3">
+                    <div class="flex justify-between items-center mt-2">
                       <button class="btn btn-ghost btn-sm" @click="showDetail(hand.id)">Details</button>
                       <button class="btn btn-primary btn-sm" @click="openSetupWizard(hand.id)" :disabled="setupLoading || activatingId === hand.id" x-text="setupLoading ? 'Loading...' : 'Activate'"></button>
                     </div>
